@@ -3,14 +3,47 @@
 from argparse import ArgumentParser
 from configparser import ConfigParser
 from collections import Counter, defaultdict
+import re
 
 from bs4 import BeautifulSoup
+
+POSITION_PATTERN = re.compile(r'\((.*), (.*), (.*)\)')
 
 def classname(node):
     for k, v in node.attrs.items():
         if k.lower() == 'class':
             return v
     return []
+
+def location(thing):
+    """ Which cardinal location an object is in"""
+    x, y = position(thing)
+    if x < 83:
+        if y < 83:
+            return 'SW'
+        elif y < 167:
+            return 'W'
+        else:
+            return 'NW'
+    if x < 167:
+        if y < 83:
+            return 'S'
+        elif y < 167:
+            return 'C'
+        else:
+            return 'N'
+    else:
+        if y < 83:
+            return 'SE'
+        elif y < 167:
+            return 'E'
+        else:
+            return 'NE'
+
+def position(thing):
+    """ Returns x,y coordinates of object """
+    x, _, y = POSITION_PATTERN.match(attribute(thing, 'pos')).groups()
+    return int(x), int(y)
 
 def attribute(node, tags, default=''):
     """ Returns the text for the node at the end of the tag chain or '' """
@@ -19,7 +52,7 @@ def attribute(node, tags, default=''):
         tags = (tags,)
     for tag in tags:
         try:
-            current_node = current_node.find(tag)
+            current_node = current_node.find(tag, recursive=False)
         except AttributeError:
             return default
     return current_node and current_node.text or default
@@ -66,6 +99,9 @@ def inventory_list(soup):
             continue
         if category in ('ThingWithComps', 'Medicine', 'Apparel'):
             name = attribute(thing, 'def')
+            if name == 'Luciferium':
+                print(thing)
+                raise RuntimeError
             value = int(attribute(thing, 'stackcount', '0'))
             if value:
                 inventory[name] += value
@@ -96,6 +132,25 @@ def equipment_list(soup):
         for item in people[person]:
             print("  {}".format(item))
 
+def harvest(soup):
+    herbs = Counter()
+    berries = Counter()
+    for thing in soup.find_all('thing'):
+        growth = attribute(thing, 'growth')
+        if not growth == '1':
+            continue
+        name = attribute(thing, 'def')
+        
+        if name == 'Plant_Berry':
+            berries[location(thing)] += 1
+        elif name == 'Plant_HealrootWild':
+            herbs[location(thing)] += 1
+    print('Herbs/Berries')
+    for locs in (('NW', 'N', 'NE',), ('W', 'C', 'E',), ('SW', 'S', 'SE',),):
+        print('{:2}/{:2} | {:2}/{:2} | {:2}/{:2}'.format(
+            herbs[locs[0]], berries[locs[0]], herbs[locs[1]], berries[locs[1]], herbs[locs[2]], berries[locs[2]],
+            ))
+            
 def run(args):
     config = ConfigParser()
     config.read('local/parse.cnf')
@@ -110,10 +165,12 @@ def run(args):
         equipment_list(soup)
     elif args.action == 'animals':
         animals(soup)
+    elif args.action == 'harvest':
+        harvest(soup)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'skills', 'inventory', 'animals',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'skills', 'inventory', 'animals', 'harvest',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
