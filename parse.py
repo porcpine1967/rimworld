@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ Spit out info from rws file"""
 from argparse import ArgumentParser
+from configparser import ConfigParser
 from collections import Counter, defaultdict
 
 from bs4 import BeautifulSoup
@@ -95,9 +96,11 @@ def equipment_list(soup):
         for item in people[person]:
             print("  {}".format(item))
 
-
 def run(args):
-    with open(args.filename) as f:
+    config = ConfigParser()
+    config.read('local/parse.cnf')
+    options = config[args.faction]
+    with open(options['file']) as f:
         soup = BeautifulSoup(f, 'lxml')
     if args.action == 'skills':
         pawn_skills(soup)
@@ -110,7 +113,7 @@ def run(args):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument("filename", help="Path to file to parser")
+    parser.add_argument("faction", help="name of faction")
     parser.add_argument("action", choices=['equipment', 'skills', 'inventory', 'animals',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
