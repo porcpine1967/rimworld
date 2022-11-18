@@ -142,25 +142,33 @@ def equipment_list(soup):
         for item in people[person]:
             print("  {}".format(item))
 
+
 def harvest(soup):
     herbs = Counter()
     berries = Counter()
+    geysers = Counter()
     for thing in soup.find_all('thing'):
+        name = attribute(thing, 'def')
+
+        if name == 'SteamGeyser':
+            geysers[location(thing)] += 1
+            continue
+
         growth = attribute(thing, 'growth')
         if not growth == '1':
             continue
-        name = attribute(thing, 'def')
-        
+
         if name == 'Plant_Berry':
             berries[location(thing)] += 1
         elif name == 'Plant_HealrootWild':
             herbs[location(thing)] += 1
-    print('Herbs/Berries')
+
+    print('Herbs/Berries/Geysers')
     for locs in (('NW', 'N', 'NE',), ('W', 'C', 'E',), ('SW', 'S', 'SE',),):
-        print('{:2}/{:2} | {:2}/{:2} | {:2}/{:2}'.format(
-            herbs[locs[0]], berries[locs[0]], herbs[locs[1]], berries[locs[1]], herbs[locs[2]], berries[locs[2]],
+        print('{:2}/{:2}/{:2} | {:2}/{:2}/{:2} | {:2}/{:2}/{:2}'.format(
+            herbs[locs[0]], berries[locs[0]], geysers[locs[0]], herbs[locs[1]], berries[locs[1]], geysers[locs[1]], herbs[locs[2]], berries[locs[2]], geysers[locs[2]],
             ))
-            
+
 def run(args):
     config = ConfigParser()
     config.read('local/parse.cnf')
