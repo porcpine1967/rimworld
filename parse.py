@@ -71,12 +71,23 @@ def animals(soup):
     for animal in sorted(animals):
         print("{},{}".format(animal, animals[animal]))
 
+def wildlife(soup):
+    """ Animals not owned by colonists."""
+    animals = Counter()
+    def add_animal(thing):
+        if attribute(thing, 'def') != 'Human' and not attribute(thing, 'faction') and attribute(thing,'mindstate'):
+            animals[attribute(thing, 'def')] += 1
+    for thing in soup.find_all('thing'):
+        add_animal(thing)
+    for animal in sorted(animals):
+        print("{},{}".format(animal, animals[animal]))
+
 def pawn_skills(soup):
     inventory = Counter()
     pawns = []
     def add_pawn(thing):
-        if attribute(thing, 'kinddef') == 'Colonist':
-            pawn = [attribute(thing, ('name', 'nick',))]
+        if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') == 'Faction_10':
+            pawn = [attribute(thing, ('name', 'nick',)) or attribute( thing, ('name', 'first'))]
             for skill in thing.skills.find_all('li'):
                 if attribute(skill, 'def'):
                     pawn.append(attribute(skill, 'level', '0'))
@@ -100,8 +111,7 @@ def inventory_list(soup):
         if category in ('ThingWithComps', 'Medicine', 'Apparel'):
             name = attribute(thing, 'def')
             if name == 'Luciferium':
-                print(thing)
-                raise RuntimeError
+                continue
             value = int(attribute(thing, 'stackcount', '0'))
             if value:
                 inventory[name] += value
@@ -165,12 +175,14 @@ def run(args):
         equipment_list(soup)
     elif args.action == 'animals':
         animals(soup)
+    elif args.action == 'wildlife':
+        wildlife(soup)
     elif args.action == 'harvest':
         harvest(soup)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'skills', 'inventory', 'animals', 'harvest',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'skills', 'inventory', 'animals', 'harvest', 'wildlife',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
