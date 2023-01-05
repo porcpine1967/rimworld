@@ -3,11 +3,16 @@
 from argparse import ArgumentParser
 from configparser import ConfigParser
 from collections import Counter, defaultdict
+import csv
 import re
 
 from bs4 import BeautifulSoup
 
+CONFIG = 'local/parse.cnf'
+BUFFER_WIDTH = 12
 POSITION_PATTERN = re.compile(r'\((.*), (.*), (.*)\)')
+SKILLS = [
+        'Shooting', 'Melee', 'Construction', 'Mining', 'Cooking', 'Plants', 'Animals', 'Crafting', 'Artistic', 'Medicine', 'Social', 'Intellectual']
 
 def classname(node):
     for k, v in node.attrs.items():
@@ -82,24 +87,120 @@ def wildlife(soup):
     for animal in sorted(animals):
         print("{},{}".format(animal, animals[animal]))
 
-def pawn_skills(soup):
-    inventory = Counter()
+class Pawn:
+    def __init__(self, thing, options):
+        self.name = attribute(thing, ('name', 'nick',)) or attribute( thing, ('name', 'first'))
+        self.changes = []
+        track_changes = False
+        olds = {}
+        try:
+            for idx, score in enumerate(options.get(self.name).split(',')):
+                olds[SKILLS[idx]] = score
+            track_changes = True
+        except AttributeError:
+            for skill in SKILLS:
+                olds[skill] = '0'
+        self.skills = defaultdict(dict)
+        for skill in thing.skills.find_all('li'):
+            skillname =  attribute(skill, 'def')
+            if skillname:
+                if olds[skillname] == 'X':
+                    self.skills[skillname]['level'] = 'X'
+                    self.skills[skillname]['passion'] = None
+                else:
+                    level = attribute(skill, 'level', '0')
+                    self.skills[skillname]['level'] = level
+                    self.skills[skillname]['passion'] = attribute(skill, 'passion')
+                    if track_changes:
+                        change = int(level) - int(olds[skillname])
+                        if change:
+                            self.changes.append('{:+} {} ({})'.format(change, skillname, level))
+        options[self.name] =  ','.join(self.skill_list[1:])
+    @property
+    def skill_list(self):
+        l = [self.name, ]
+        for skill in SKILLS:
+            l.append(self.skills[skill]['level'])
+
+        return l
+
+def all_pawns(soup, options):
     pawns = []
     def add_pawn(thing):
         if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') == 'Faction_10':
-            pawn = [attribute(thing, ('name', 'nick',)) or attribute( thing, ('name', 'first'))]
-            for skill in thing.skills.find_all('li'):
-                if attribute(skill, 'def'):
-                    pawn.append(attribute(skill, 'level', '0'))
-            pawns.append(','.join(pawn))
+            pawn = Pawn(thing, options)
+            pawns.append(pawn)
     for alivepawns in soup.find_all('pawnsalive'):
         for thing in alivepawns.findChildren('li', recursive=False):
             add_pawn(thing)
     for thing in soup.find_all('thing'):
         add_pawn(thing)
-    for pawn in sorted(pawns):
-        print(pawn)
+    return pawns
 
+def all_prisoners(soup):
+    pawns = []
+    def add_pawn(thing):
+        if attribute(thing, ('guest', 'gueststatus',)) == 'Prisoner':
+            pawn = Pawn(thing, {})
+            pawns.append(pawn)
+    for thing in soup.find_all('thing'):
+        add_pawn(thing)
+    return pawns
+
+def all_dead(soup):
+    for pd in soup.find_all('pawnsdead'):
+        for li in pd.find_all('li'):
+            if attribute(li, 'def') == 'Human':
+                pawn = Pawn(li, {})
+                print(pawn.skill_list)
+
+def pawn_skills(soup, options):
+    def buffers(skill):
+        length = int(skill) // 10 + 1
+        buffer_back = (BUFFER_WIDTH - length) // 2
+        buffer_front = buffer_back + (BUFFER_WIDTH - length) % 2
+        return ' '*buffer_front, ' '*buffer_back
+    def format_normal(skill):
+        bf, bb = buffers(skill)
+        return bf + '\033[00m{}\033[00m'.format(skill) + bb
+    def format_minor(skill):
+        bf, bb = buffers(skill)
+        return bf + '\033[92m{}\033[00m'.format(skill) + bb
+    def format_major(skill):
+        bf, bb = buffers(skill)
+        return bf + '\033[92m\033[01m{}\033[00m'.format(skill) + bb
+
+    pawns = all_pawns(soup, options)
+    prisoners = all_prisoners(soup)
+    changes = []
+    fmt = '  {:10} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12}\n'
+    print(fmt.format('Pawn', *SKILLS))
+    def print_pawn(pawn):
+        items = [pawn.name,]
+        for skill in SKILLS:
+            passion = pawn.skills[skill]['passion']
+            level = pawn.skills[skill]['level']
+            if passion == 'Minor':
+                items.append(format_minor(level))
+            elif passion == 'Major':
+                items.append(format_major(level))
+            elif level != 'X':
+                items.append(format_normal(level))
+            else:
+                items.append('--')
+        print(fmt.format(*items))
+    for pawn in sorted(pawns, key=lambda x: x.name):
+        if pawn.changes:
+            changes.append('{}: {}'.format(pawn.name, ', '.join(pawn.changes)))
+        print_pawn(pawn)
+    if prisoners:
+        print('PRISONERS')
+        for pawn in sorted(prisoners, key=lambda x: x.name):
+            print_pawn(pawn)
+    if changes:
+        print('\nCHANGES:')
+        for change in changes:
+            print(change)
 def inventory_list(soup):
     inventory = Counter()
     equipment = Counter()
@@ -160,7 +261,7 @@ def harvest(soup):
 
         if name == 'Plant_Berry':
             berries[location(thing)] += 1
-        elif name == 'Plant_HealrootWild':
+        elif name == 'Plant_TreeDrago':
             herbs[location(thing)] += 1
 
     print('Herbs/Berries/Geysers')
@@ -168,15 +269,22 @@ def harvest(soup):
         print('{:2}/{:2}/{:2} | {:2}/{:2}/{:2} | {:2}/{:2}/{:2}'.format(
             herbs[locs[0]], berries[locs[0]], geysers[locs[0]], herbs[locs[1]], berries[locs[1]], geysers[locs[1]], herbs[locs[2]], berries[locs[2]], geysers[locs[2]],
             ))
+def practice():
+    fmt = '{:^12} {:^12} {:^12} {:^12} {:^12}'
+    print(fmt.format('Pawn', *SKILLS[:4]))
+    items = ['Cherry', format_major(1), format_major(2), format_major(11), format_major(17)]
+    print(fmt.format(*items))
 
 def run(args):
     config = ConfigParser()
-    config.read('local/parse.cnf')
+    config.read(CONFIG)
     options = config[args.faction]
     with open(options['file']) as f:
         soup = BeautifulSoup(f, 'lxml')
     if args.action == 'skills':
-        pawn_skills(soup)
+        pawn_skills(soup, options)
+        with open(CONFIG, 'w') as f:
+            config.write(f)
     elif args.action == 'inventory':
         inventory_list(soup)
     elif args.action == 'equipment':
@@ -187,10 +295,12 @@ def run(args):
         wildlife(soup)
     elif args.action == 'harvest':
         harvest(soup)
+    elif args.action == 'dead':
+        all_dead(soup)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'skills', 'inventory', 'animals', 'harvest', 'wildlife',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
