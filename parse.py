@@ -201,48 +201,117 @@ def pawn_skills(soup, options):
         print('\nCHANGES:')
         for change in changes:
             print(change)
+
+class Thing:
+    CATEGORIES = {
+        'Drugs': ('Ambrosia', 'Beer', 'SmokeleafJoint', 'Yayo',),
+        'Medicine': ('Neutroamine', 'Penoxycyline',),
+        'Ores' : ('Gold', 'Jade', 'Plasteel', 'Silver', 'Steel', 'Uranium',),
+        'Raw Food': ('Milk', 'Wort',),
+        'Wool': ('Cloth', 'DevilstrandCloth',),
+    }
+    QUALITY = ('Apparel', 'Gun', 'MeleeWeapon', 'Misc',)
+    TRUNCATE = ('Blocks', 'Meal', 'Medicine', 'Wool',)
+    def __init__(self, thing):
+        self.name = attribute(thing, 'def')
+        self.category = 'Misc'
+        self.stuff = None
+        self.quality = None
+        if self.name.startswith('Meat_'):
+            self.category = 'Raw Food'
+            self.name = 'Meat'
+        elif self.name.startswith('Raw'):
+            self.category = 'Raw Food'
+            self.name = self.name[3:]
+        elif '_' in self.name:
+            self.category, self.name = self.name.split('_', 1)
+        for category in Thing.TRUNCATE:
+            if self.name.startswith(category):
+                self.category = category
+                self.name = self.name[len(category):]
+        self.base_name = self.name
+        for category, items in Thing.CATEGORIES.items():
+            if self.name in items:
+                self.category = category
+        if self.category in Thing.QUALITY:
+            self.stuff = attribute(thing, 'stuff')
+            quality = attribute(thing, 'quality')
+            qualifications = []
+            if self.stuff:
+                if self.stuff == 'WoodLog':
+                    self.stuff = 'Wood'
+                elif self.stuff.startswith('Blocks'):
+                    self.stuff = self.stuff[6:]
+                qualifications.append(self.stuff)
+            if quality:
+                qualifications.append(quality)
+            if qualifications:
+                self.name = '{:15} ({})'.format(self.name, ', '.join(qualifications))
+        self.count = int(attribute(thing, 'stackcount', '0'))
+
 def inventory_list(soup):
-    inventory = Counter()
-    equipment = Counter()
+    inventory = defaultdict(Counter)
     for thing in soup.find_all('thing'):
         try:
-            category = classname(thing)[0]
+            rimworld_category = classname(thing)[0]
         except IndexError:
             continue
-        if category in ('ThingWithComps', 'Medicine', 'Apparel'):
-            name = attribute(thing, 'def')
-            if name == 'Luciferium':
+        if rimworld_category in ('ThingWithComps', 'Medicine', 'Apparel'):
+            obj = Thing(thing)
+            if obj.name == 'Luciferium':
                 continue
-            value = int(attribute(thing, 'stackcount', '0'))
-            if value:
-                inventory[name] += value
-        if "MinifiedThing" in category:
-            subthing = thing.innercontainer.innerlist.li.find('def').text
-            inventory[subthing] += 1
 
-    for k in sorted(inventory):
-        v = inventory[k]
-        print(','.join((k, str(v),)))
+            inventory[obj.category][obj.name] += obj.count
+        if "MinifiedThing" in rimworld_category:
+            obj = Thing(thing.innercontainer.innerlist.li)
+            inventory[obj.category][obj.name] += 1
+
+    for c in sorted(inventory):
+        print(c)
+        for k in sorted(inventory[c]):
+            v = inventory[c][k]
+            print(' {}: {}'.format(k, v))
 
 def equipment_list(soup):
+    armors = ('Flak', 'Helmet', )
     people = defaultdict(list)
-    for thing in soup.find_all('thing'):
-        category = classname(thing)
-        if category == ['Pawn',] and attribute(thing, 'kinddef') == 'Colonist':
-            key = attribute(thing, ('name', 'nick',))
-
-            for item in thing.apparel.find_all('li'):
-                people[key].append("  {:15} ({})".format(attribute(item, 'def')[8:], attribute(item, 'stuff')))
-            for item in thing.equipment.find_all('li'):
-                weapon = attribute(item, 'def')
+    def add_pawn(thing):
+        if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') == 'Faction_10':
+            armor_level = 0
+            key = attribute(thing, ('name', 'nick',)) or attribute(thing, ('name', 'first',))
+            armed = False
+            combat_role = ''
+            for li in thing.apparel.find_all('li'):
+                item = Thing(li)
+                for a in armors:
+                    if a in item.name:
+                        armor_level += 1
+                if item.name == 'PowerArmor':
+                    armor_level += 1
+                if item.base_name == 'Duster' and item.stuff == 'DevilstrandCloth':
+                    armor_level += 1
+                people[key].append("{}".format(item.name))
+            people[key].sort()
+            for li in thing.equipment.find_all('li'):
+                weapon = attribute(li, 'def')
                 if weapon:
-                    _, name = weapon.split('_', 2)
-                    people[key].append("  {:15} ({})".format(name, attribute(item, 'quality')))
+                    armed = True
+                    item = Thing(li)
+                    people[key].append(item.name)
+                    combat_role = item.category
+            if not armed:
+                people[key].append('** UNARMED **')
+            people[key].insert(0, 'Armor Level: {} ({})'.format(armor_level, combat_role))
+    for alivepawns in soup.find_all('pawnsalive'):
+        for thing in alivepawns.findChildren('li', recursive=False):
+            add_pawn(thing)
+
+    for thing in soup.find_all('thing'):
+        add_pawn(thing)
     for person in sorted(people):
         print(person)
         for item in people[person]:
-            print("  {}".format(item))
-
+            print("    {}".format(item))
 
 def harvest(soup):
     herbs = Counter()
