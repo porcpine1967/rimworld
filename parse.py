@@ -286,8 +286,8 @@ def equipment_list(soup):
                 for a in armors:
                     if a in item.name:
                         armor_level += 1
-                if item.name == 'PowerArmor':
-                    armor_level += 1
+                if item.base_name == 'PowerArmor':
+                    armor_level += 2
                 if item.base_name == 'Duster' and item.stuff == 'DevilstrandCloth':
                     armor_level += 1
                 people[key].append("{}".format(item.name))
