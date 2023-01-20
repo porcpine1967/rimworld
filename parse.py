@@ -217,6 +217,11 @@ class Thing:
         self.category = 'Misc'
         self.stuff = None
         self.quality = None
+        try:
+            self.position = position(thing)
+        except AttributeError:
+            self.position = (-1, -1,)
+
         if self.name.startswith('Meat_'):
             self.category = 'Raw Food'
             self.name = 'Meat'
@@ -225,14 +230,18 @@ class Thing:
             self.name = self.name[3:]
         elif '_' in self.name:
             self.category, self.name = self.name.split('_', 1)
+
         for category in Thing.TRUNCATE:
             if self.name.startswith(category):
                 self.category = category
                 self.name = self.name[len(category):]
+
         self.base_name = self.name
+
         for category, items in Thing.CATEGORIES.items():
             if self.name in items:
                 self.category = category
+
         if self.category in Thing.QUALITY:
             self.stuff = attribute(thing, 'stuff')
             quality = attribute(thing, 'quality')
@@ -247,10 +256,35 @@ class Thing:
                 qualifications.append(quality)
             if qualifications:
                 self.name = '{:15} ({})'.format(self.name, ', '.join(qualifications))
+
         self.count = int(attribute(thing, 'stackcount', '0'))
+
+def ancient_danger_zone(soup):
+    """ Coordinates around all ancient cryptosleep caskets +/- 5"""
+    top = left = 250 # max position = 249
+    bottom = right = 0
+    for thing in soup.find_all('thing'):
+        try:
+            rimworld_category = classname(thing)[0]
+        except IndexError:
+            continue
+        if rimworld_category == 'Building_AncientCryptosleepCasket':
+            try:
+                if not thing.innercontainer.innerlist.li:
+                    continue
+            except AttributeError:
+                continue
+            current_x, current_y = position(thing)
+            if position:
+                top = min(top, current_y)
+                bottom = max(bottom, current_y)
+                left = min(left, current_x)
+                right = max(right, current_x)
+    return top - 5, bottom + 5, left - 5, right + 5
 
 def inventory_list(soup):
     inventory = defaultdict(Counter)
+    top, left, bottom, right = ancient_danger_zone(soup)
     for thing in soup.find_all('thing'):
         try:
             rimworld_category = classname(thing)[0]
@@ -258,7 +292,7 @@ def inventory_list(soup):
             continue
         if rimworld_category in ('ThingWithComps', 'Medicine', 'Apparel'):
             obj = Thing(thing)
-            if obj.name == 'Luciferium':
+            if top < obj.position[1] < bottom and left < obj.position[0] < right:
                 continue
 
             inventory[obj.category][obj.name] += obj.count
