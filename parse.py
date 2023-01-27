@@ -11,8 +11,31 @@ from bs4 import BeautifulSoup
 CONFIG = 'local/parse.cnf'
 BUFFER_WIDTH = 12
 POSITION_PATTERN = re.compile(r'\((.*), (.*), (.*)\)')
-SKILLS = [
-        'Shooting', 'Melee', 'Construction', 'Mining', 'Cooking', 'Plants', 'Animals', 'Crafting', 'Artistic', 'Medicine', 'Social', 'Intellectual']
+SKILLS = ['Shooting', 'Melee', 'Construction', 'Mining', 'Cooking', 'Plants', 'Animals', 'Crafting', 'Artistic', 'Medicine', 'Social', 'Intellectual']
+
+SKILL_UPGRADE = {
+    0: 1000,
+    1: 2000,
+    2: 3000,
+    3: 4000,
+    4: 5000,
+    5: 6000,
+    6: 7000,
+    7: 8000,
+    8: 9000,
+    9: 10000,
+    10: 12000,
+    11: 14000,
+    12: 16000,
+    13: 18000,
+    14: 20000,
+    15: 22000,
+    16: 24000,
+    17: 26000,
+    18: 28000,
+    19: 30000,
+    20: 32000,
+}
 
 def classname(node):
     for k, v in node.attrs.items():
@@ -107,14 +130,22 @@ class Pawn:
                 if olds[skillname] == 'X':
                     self.skills[skillname]['level'] = 'X'
                     self.skills[skillname]['passion'] = None
+                    self.skills[skillname]['pct'] = 0
                 else:
                     level = attribute(skill, 'level', '0')
                     self.skills[skillname]['level'] = level
                     self.skills[skillname]['passion'] = attribute(skill, 'passion')
+                    self.skills[skillname]['pct'] = float(attribute(skill, 'xpsincelastlevel', '0')) / SKILL_UPGRADE[int(level)]
                     if track_changes:
                         change = int(level) - int(olds[skillname])
                         if change:
                             self.changes.append('{:+} {} ({})'.format(change, skillname, level))
+        self.resistance = 0
+        self.mood = 0
+        if thing.guest.gueststatus and thing.guest.gueststatus.text == 'Prisoner':
+                self.resistance = float(thing.guest.resistance.text)
+        else:
+            self.mood = float(attribute(thing, ('needs', 'needs', 'li', 'curlevel',)))
         options[self.name] =  ','.join(self.skill_list[1:])
     @property
     def skill_list(self):
@@ -156,7 +187,7 @@ def all_dead(soup):
 
 def pawn_skills(soup, options):
     def buffers(skill):
-        length = int(skill) // 10 + 1
+        length = len(skill)
         buffer_back = (BUFFER_WIDTH - length) // 2
         buffer_front = buffer_back + (BUFFER_WIDTH - length) % 2
         return ' '*buffer_front, ' '*buffer_back
@@ -173,13 +204,25 @@ def pawn_skills(soup, options):
     pawns = all_pawns(soup, options)
     prisoners = all_prisoners(soup)
     changes = []
-    fmt = '  {:10} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12}\n'
+    fmt = '  {:15} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12}\n'
     print(fmt.format('Pawn', *SKILLS))
     def print_pawn(pawn):
-        items = [pawn.name,]
+        if pawn.resistance:
+            name = "{} ({:.0f})".format(pawn.name, pawn.resistance)
+        elif pawn.mood:
+            name = "{} ({:.1f})".format(pawn.name, pawn.mood)
+        else:
+            name = pawn.name
+        items = [name,]
         for skill in SKILLS:
             passion = pawn.skills[skill]['passion']
             level = pawn.skills[skill]['level']
+            pct = pawn.skills[skill]['pct']
+            if pct < 0:
+                level += '(-)'
+            elif pct > 0.1:
+                level = '{:.2f}'.format(int(level) + pct)
+                level = level[:-1] # because it was rounding up to the next level on > .95
             if passion == 'Minor':
                 items.append(format_minor(level))
             elif passion == 'Major':
@@ -212,53 +255,83 @@ class Thing:
     }
     QUALITY = ('Apparel', 'Gun', 'MeleeWeapon', 'Misc',)
     TRUNCATE = ('Blocks', 'Meal', 'Medicine', 'Wool',)
+    maxes = defaultdict(int)
     def __init__(self, thing):
-        self.name = attribute(thing, 'def')
+        name = attribute(thing, 'def')
         self.category = 'Misc'
         self.stuff = None
         self.quality = None
+        self.qualifications = []
+        self.health = None
+        self.biocoded = False
         try:
             self.position = position(thing)
         except AttributeError:
             self.position = (-1, -1,)
 
-        if self.name.startswith('Meat_'):
+        try:
+            self.health = int(attribute(thing, 'health'))
+        except ValueError:
+            self.health = 0
+
+        try:
+            self.biocoded = attribute(thing, 'biocoded') == 'True'
+        except ValueError:
+            pass
+
+        if name.startswith('Meat_'):
             self.category = 'Raw Food'
-            self.name = 'Meat'
-        elif self.name.startswith('Raw'):
+            name = 'Meat'
+        elif name.startswith('Raw'):
             self.category = 'Raw Food'
-            self.name = self.name[3:]
-        elif '_' in self.name:
-            self.category, self.name = self.name.split('_', 1)
+            name = name[3:]
+        elif '_' in name:
+            self.category, name = name.split('_', 1)
 
         for category in Thing.TRUNCATE:
-            if self.name.startswith(category):
+            if name.startswith(category):
                 self.category = category
-                self.name = self.name[len(category):]
-
-        self.base_name = self.name
+                name = name[len(category):]
+        self.base_name = name
 
         for category, items in Thing.CATEGORIES.items():
-            if self.name in items:
+            if name in items:
                 self.category = category
 
         if self.category in Thing.QUALITY:
             self.stuff = attribute(thing, 'stuff')
+            Thing.maxes[self.max_key] = max(self.health, Thing.maxes[self.max_key])
             quality = attribute(thing, 'quality')
-            qualifications = []
             if self.stuff:
                 if self.stuff == 'WoodLog':
                     self.stuff = 'Wood'
                 elif self.stuff.startswith('Blocks'):
                     self.stuff = self.stuff[6:]
-                qualifications.append(self.stuff)
+                self.qualifications.append(self.stuff)
             if quality:
-                qualifications.append(quality)
-            if qualifications:
-                self.name = '{:15} ({})'.format(self.name, ', '.join(qualifications))
+                self.qualifications.append(quality)
+            if self.qualifications:
+                name = '{:15} ({})'.format(name, ', '.join(self.qualifications))
 
-        self.count = int(attribute(thing, 'stackcount', '0'))
+        self.count = int(attribute(thing, 'stackcount', '1'))
 
+    @property
+    def max_key(self):
+        if self.stuff:
+            return '{} {}'.format(self.stuff, self.base_name)
+        else:
+            return self.base_name
+
+    @property
+    def name(self):
+        n = self.base_name
+        if self.qualifications:
+            n = '{:15} ({}'.format(self.base_name, ', '.join(self.qualifications))
+            if self.health and Thing.maxes[self.max_key] and not Thing.maxes[self.max_key] % 5:
+                n += ' {}%'.format(int(100 * self.health / Thing.maxes[self.max_key]))
+
+            n += ')'
+        return n
 def ancient_danger_zone(soup):
     """ Coordinates around all ancient cryptosleep caskets +/- 5"""
     top = left = 250 # max position = 249
@@ -282,9 +355,10 @@ def ancient_danger_zone(soup):
                 right = max(right, current_x)
     return top - 5, bottom + 5, left - 5, right + 5
 
-def inventory_list(soup):
+def things_in_inventory(soup):
     inventory = defaultdict(Counter)
     top, left, bottom, right = ancient_danger_zone(soup)
+    things = []
     for thing in soup.find_all('thing'):
         try:
             rimworld_category = classname(thing)[0]
@@ -294,12 +368,17 @@ def inventory_list(soup):
             obj = Thing(thing)
             if top < obj.position[1] < bottom and left < obj.position[0] < right:
                 continue
-
-            inventory[obj.category][obj.name] += obj.count
+            things.append(obj)
         if "MinifiedThing" in rimworld_category:
             obj = Thing(thing.innercontainer.innerlist.li)
-            inventory[obj.category][obj.name] += 1
+            things.append(obj)
+    for obj in things:
+        if not obj.biocoded:
+            inventory[obj.category][obj.name] += obj.count
+    return inventory
 
+def inventory_list(soup):
+    inventory = things_in_inventory(soup)
     for c in sorted(inventory):
         print(c)
         for k in sorted(inventory[c]):
@@ -307,6 +386,7 @@ def inventory_list(soup):
             print(' {}: {}'.format(k, v))
 
 def equipment_list(soup):
+    things_in_inventory(soup) # load Thing.maxes
     armors = ('Flak', 'Helmet', )
     people = defaultdict(list)
     def add_pawn(thing):
@@ -322,7 +402,7 @@ def equipment_list(soup):
                         armor_level += 1
                 if item.base_name == 'PowerArmor':
                     armor_level += 2
-                if item.base_name == 'Duster' and item.stuff == 'DevilstrandCloth':
+                if item.max_key in ('DevilstrandCloth Duster', 'DevilstrandCloth Parka',):
                     armor_level += 1
                 people[key].append("{}".format(item.name))
             people[key].sort()
