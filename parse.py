@@ -254,7 +254,7 @@ class Thing:
         'Wool': ('Cloth', 'DevilstrandCloth',),
     }
     QUALITY = ('Apparel', 'Gun', 'MeleeWeapon', 'Misc',)
-    TRUNCATE = ('Blocks', 'Meal', 'Medicine', 'Wool',)
+    TRUNCATE = ('Blocks', 'Grenade', 'Meal', 'Medicine', 'Wool',)
     maxes = defaultdict(int)
     def __init__(self, thing):
         name = attribute(thing, 'def')
@@ -385,12 +385,13 @@ def inventory_list(soup):
             v = inventory[c][k]
             print(' {}: {}'.format(k, v))
 
-def equipment_list(soup):
+def equipment_list(soup, options):
     things_in_inventory(soup) # load Thing.maxes
     armors = ('Flak', 'Helmet', )
     people = defaultdict(list)
     def add_pawn(thing):
         if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') == 'Faction_10':
+            pawn = Pawn(thing, options)
             armor_level = 0
             key = attribute(thing, ('name', 'nick',)) or attribute(thing, ('name', 'first',))
             armed = False
@@ -413,9 +414,17 @@ def equipment_list(soup):
                     item = Thing(li)
                     people[key].append(item.name)
                     combat_role = item.category
-            if not armed:
+            combat_info = ''
+            if pawn.skills['Shooting']['level'] == 'X' and pawn.skills['Melee']['level'] == 'X':
+                combat_info = '(Non Violent)'
+            elif combat_role in ('Gun', 'Grenade',):
+                combat_info = '(Range - {})'.format(pawn.skills['Shooting']['level'])
+            elif combat_role in ('MeleeWeapon',):
+                combat_info = '(Melee - {})'.format(pawn.skills['Melee']['level'])
+            elif not armed:
                 people[key].append('** UNARMED **')
-            people[key].insert(0, 'Armor Level: {} ({})'.format(armor_level, combat_role))
+
+            people[key].insert(0, 'Armor Level: {} {}'.format(armor_level, combat_info))
     for alivepawns in soup.find_all('pawnsalive'):
         for thing in alivepawns.findChildren('li', recursive=False):
             add_pawn(thing)
@@ -452,11 +461,15 @@ def harvest(soup):
         print('{:2}/{:2}/{:2} | {:2}/{:2}/{:2} | {:2}/{:2}/{:2}'.format(
             herbs[locs[0]], berries[locs[0]], geysers[locs[0]], herbs[locs[1]], berries[locs[1]], geysers[locs[1]], herbs[locs[2]], berries[locs[2]], geysers[locs[2]],
             ))
-def practice():
-    fmt = '{:^12} {:^12} {:^12} {:^12} {:^12}'
-    print(fmt.format('Pawn', *SKILLS[:4]))
-    items = ['Cherry', format_major(1), format_major(2), format_major(11), format_major(17)]
-    print(fmt.format(*items))
+def quests(soup):
+    def untag(string):
+        return re.sub(r'(<[^>]+>|\([*/][^)]+\))', '', string).replace('\n\n', '\n')
+    for quests in soup.find_all('quests'):
+        for li in quests.findChildren('li', recursive=False):
+            if not attribute(li, 'cleanedup'):
+                print(attribute(li, 'name'))
+                print(untag(attribute(li, 'description')))
+                print('='*25)
 
 def run(args):
     config = ConfigParser()
@@ -471,7 +484,7 @@ def run(args):
     elif args.action == 'inventory':
         inventory_list(soup)
     elif args.action == 'equipment':
-        equipment_list(soup)
+        equipment_list(soup, options)
     elif args.action == 'animals':
         animals(soup)
     elif args.action == 'wildlife':
@@ -480,10 +493,11 @@ def run(args):
         harvest(soup)
     elif args.action == 'dead':
         all_dead(soup)
-
+    elif args.action == 'quests':
+        quests(soup)
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
