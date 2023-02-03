@@ -114,6 +114,8 @@ class Pawn:
     def __init__(self, thing, options):
         self.name = attribute(thing, ('name', 'nick',)) or attribute( thing, ('name', 'first'))
         self.changes = []
+        self.thing = thing
+
         track_changes = False
         olds = {}
         try:
@@ -234,7 +236,7 @@ def pawn_skills(soup, options):
         print(fmt.format(*items))
     for pawn in sorted(pawns, key=lambda x: x.name):
         if pawn.changes:
-            changes.append('{}: {}'.format(pawn.name, ', '.join(pawn.changes)))
+            changes.append('{:15}: {}'.format(pawn.name, ', '.join(pawn.changes)))
         print_pawn(pawn)
     if prisoners:
         print('PRISONERS')
@@ -254,7 +256,7 @@ class Thing:
         'Wool': ('Cloth', 'DevilstrandCloth',),
     }
     QUALITY = ('Apparel', 'Gun', 'MeleeWeapon', 'Misc',)
-    TRUNCATE = ('Blocks', 'Grenade', 'Meal', 'Medicine', 'Wool',)
+    TRUNCATE = ('Blocks', 'Grenade', 'Meal', 'Medicine', 'Unfinished', 'Wool',)
     maxes = defaultdict(int)
     def __init__(self, thing):
         name = attribute(thing, 'def')
@@ -279,6 +281,8 @@ class Thing:
         except ValueError:
             pass
 
+        self.tainted = attribute(thing, 'wornbycorpse') == 'True'
+
         if name.startswith('Meat_'):
             self.category = 'Raw Food'
             name = 'Meat'
@@ -298,6 +302,13 @@ class Thing:
             if name in items:
                 self.category = category
 
+        if self.tainted:
+            self.category = 'Tainted'
+
+        if self.category == 'Unfinished':
+            self.base_name = attribute(thing, 'recipe').split('_')[-1]
+            self.qualifications.append(attribute(thing, 'creatorname'))
+
         if self.category in Thing.QUALITY:
             self.stuff = attribute(thing, 'stuff')
             Thing.maxes[self.max_key] = max(self.health, Thing.maxes[self.max_key])
@@ -310,8 +321,6 @@ class Thing:
                 self.qualifications.append(self.stuff)
             if quality:
                 self.qualifications.append(quality)
-            if self.qualifications:
-                name = '{:15} ({})'.format(name, ', '.join(self.qualifications))
 
         self.count = int(attribute(thing, 'stackcount', '1'))
 
@@ -364,7 +373,7 @@ def things_in_inventory(soup):
             rimworld_category = classname(thing)[0]
         except IndexError:
             continue
-        if rimworld_category in ('ThingWithComps', 'Medicine', 'Apparel'):
+        if rimworld_category in ('ThingWithComps', 'Medicine', 'Apparel', 'UnfinishedThing'):
             obj = Thing(thing)
             if top < obj.position[1] < bottom and left < obj.position[0] < right:
                 continue
@@ -401,12 +410,13 @@ def equipment_list(soup, options):
                 for a in armors:
                     if a in item.name:
                         armor_level += 1
-                if item.base_name == 'PowerArmor':
+                if item.base_name in ('ArmorRecon', 'PowerArmor'):
                     armor_level += 2
                 if item.max_key in ('DevilstrandCloth Duster', 'DevilstrandCloth Parka',):
                     armor_level += 1
                 people[key].append("{}".format(item.name))
             people[key].sort()
+
             for li in thing.equipment.find_all('li'):
                 weapon = attribute(li, 'def')
                 if weapon:
@@ -471,6 +481,11 @@ def quests(soup):
                 print(untag(attribute(li, 'description')))
                 print('='*25)
 
+def test(soup, options):
+    """
+    For ad hoc
+    """
+
 def run(args):
     config = ConfigParser()
     config.read(CONFIG)
@@ -495,9 +510,11 @@ def run(args):
         all_dead(soup)
     elif args.action == 'quests':
         quests(soup)
+    elif args.action == 'test':
+        test(soup, options)
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests','test',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
