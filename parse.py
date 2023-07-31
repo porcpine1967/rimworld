@@ -13,6 +13,8 @@ BUFFER_WIDTH = 12
 POSITION_PATTERN = re.compile(r'\((.*), (.*), (.*)\)')
 SKILLS = ['Shooting', 'Melee', 'Construction', 'Mining', 'Cooking', 'Plants', 'Animals', 'Crafting', 'Artistic', 'Medicine', 'Social', 'Intellectual']
 
+COLONIST_FACTIONS = ('Faction_10', 'Faction_21',)
+
 SKILL_UPGRADE = {
     0: 1000,
     1: 2000,
@@ -160,7 +162,7 @@ class Pawn:
 def all_pawns(soup, options):
     pawns = []
     def add_pawn(thing):
-        if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') == 'Faction_10':
+        if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') in COLONIST_FACTIONS:
             pawn = Pawn(thing, options)
             pawns.append(pawn)
     for alivepawns in soup.find_all('pawnsalive'):
@@ -399,7 +401,7 @@ def equipment_list(soup, options):
     armors = ('Flak', 'Helmet', )
     people = defaultdict(list)
     def add_pawn(thing):
-        if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') == 'Faction_10':
+        if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') in COLONIST_FACTIONS:
             pawn = Pawn(thing, options)
             armor_level = 0
             key = attribute(thing, ('name', 'nick',)) or attribute(thing, ('name', 'first',))
