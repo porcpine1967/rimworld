@@ -288,6 +288,8 @@ class Thing:
         if name.startswith('Meat_'):
             self.category = 'Raw Food'
             name = 'Meat'
+        elif name.startswith('Egg'):
+            self.category = 'Raw Food'
         elif name.startswith('Raw'):
             self.category = 'Raw Food'
             name = name[3:]
@@ -483,6 +485,21 @@ def quests(soup):
                 print(untag(attribute(li, 'description')))
                 print('='*25)
 
+def queue(soup):
+    ctr = Counter()
+    for thing in soup.find_all('thing'):
+        try:
+            rimworld_category = classname(thing)[0]
+        except IndexError:
+            continue
+        name = attribute(thing, 'def')
+        if name == 'HydroponicsBasin':
+            plant = attribute(thing, 'plantdeftogrow').replace('Plant_', '')
+            ctr[f"{name} - {plant}"] += 1
+
+    for k, v in ctr.items():
+        print(k, v)
+
 def test(soup, options):
     """
     For ad hoc
@@ -512,11 +529,13 @@ def run(args):
         all_dead(soup)
     elif args.action == 'quests':
         quests(soup)
+    elif args.action == 'queue':
+        queue(soup)
     elif args.action == 'test':
         test(soup, options)
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests','test',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests', 'queue', 'test',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
