@@ -486,7 +486,21 @@ def quests(soup):
                 print('='*25)
 
 def queue(soup):
-    ctr = Counter()
+    basins = Counter()
+    crops = Counter()
+    repeat_bills = []
+    target_bills = []
+    forever_bills = []
+    def formatted_recipe(bill):
+        recipe = attribute(bill, 'recipe')
+        recipe = recipe.split('_')[-1]
+        recipe = re.sub(r'StoneBlocks(.*)', r'\1 Blocks', recipe)
+        recipe = recipe.replace('Bulk', ' (x4)')
+        recipe = recipe.replace('CookMealFine', 'FineMeal')
+        recipe = recipe.replace('MedicineIndustrial', 'Medicine')        
+        recipe = re.sub(r'([a-z])([A-Z])', r'\1 \2', recipe)
+        return recipe
+        
     for thing in soup.find_all('thing'):
         try:
             rimworld_category = classname(thing)[0]
@@ -494,11 +508,50 @@ def queue(soup):
             continue
         name = attribute(thing, 'def')
         if name == 'HydroponicsBasin':
-            plant = attribute(thing, 'plantdeftogrow').replace('Plant_', '')
-            ctr[f"{name} - {plant}"] += 1
-
-    for k, v in ctr.items():
-        print(k, v)
+            if attribute(thing, 'poweron') == 'False':
+                plant = 'Off'
+            else:
+                plant = attribute(thing, 'plantdeftogrow').replace('Plant_', '')
+            basins[plant] += 1
+        if attribute(thing, 'sown') == 'True':
+            crops[name.replace('Plant_', '')] += 1
+        for stack in thing.find_all('bills'):
+            for bill in stack.find_all('li', recursive=False):
+                if attribute(bill, 'suspended') == 'True':
+                    continue
+                repeat_count = int(attribute(bill, 'repeatcount', 0))
+                if not repeat_count:
+                    continue
+                recipe = formatted_recipe(bill)
+                if attribute(bill, 'repeatmode') == 'TargetCount':
+                    target_bills.append((recipe, int(attribute(bill, 'targetcount', 0),)))
+                elif attribute(bill, 'repeatmode') == 'RepeatCount':
+                    repeat_bills.append((recipe, repeat_count))
+                elif attribute(bill, 'repeatmode') == 'Forever':
+                    forever_bills.append((recipe, 'forever',))
+    if basins:
+        print('Basins')
+        for basin in sorted(basins):
+            print(f"  {basin:15}: {basins[basin]:4}")
+    if crops:
+        print('Crops')
+        for crop in sorted(crops):
+            in_basin = basins[crop] * 4
+            count = crops[crop] - in_basin
+            if count > 0:
+                print(f"  {crop:15}: {count:4}")
+    if repeat_bills:
+        print('Bills')
+        for bill in sorted(repeat_bills, key=lambda x: x[0]):
+            print(f"  {bill[0]:25}: {bill[1]:4}")
+    if target_bills:
+        print('Bills with Target')
+        for bill in sorted(target_bills, key=lambda x: x[0]):
+            print(f"  {bill[0]:25}: {bill[1]:4}")
+    if forever_bills:
+        print('Repeat Forever')
+        for bill in sorted(forever_bills, key=lambda x: x[0]):
+            print(f"  {bill[0]}")
 
 def test(soup, options):
     """
