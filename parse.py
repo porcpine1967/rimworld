@@ -144,20 +144,40 @@ class Pawn:
                         change = int(level) - int(olds[skillname])
                         if change:
                             self.changes.append('{:+} {} ({})'.format(change, skillname, level))
-        self.resistance = 0
+        self.injury_count = self.max_severity = 0
+        for tracker in thing.find_all('healthtracker'):
+            for issue in tracker.find_all('li'):
+                issue_def = attribute(issue, 'def')
+                if issue_def in ('', 'Asthma', 'MissingBodyPart',)\
+                   or issue_def.startswith('Bionic')\
+                   or issue_def.startswith('Smokeleaf')\
+                   or attribute(issue, 'ispermanent'):
+                    continue
+                self.injury_count += 1
+                self.max_severity = max([self.max_severity, float(attribute(issue, 'severity', 0))])
+        self.resistance = -1
         self.mood = 0
         if thing.guest.gueststatus and thing.guest.gueststatus.text == 'Prisoner':
-                self.resistance = float(thing.guest.resistance.text)
+            self.resistance = float(thing.guest.resistance.text)
         else:
-            self.mood = float(attribute(thing, ('needs', 'needs', 'li', 'curlevel',)))
+            try:
+                self.mood = float(attribute(thing, ('needs', 'needs', 'li', 'curlevel',)))
+            except ValueError:
+                pass
         options[self.name] =  ','.join(self.skill_list[1:])
     @property
     def skill_list(self):
         l = [self.name, ]
         for skill in SKILLS:
             l.append(self.skills[skill]['level'])
-
         return l
+
+    @property
+    def health(self):
+        if not self.injury_count:
+            return '         '
+        else:
+            return f"({self.injury_count:2} {self.max_severity: >4.1f})"
 
 def all_pawns(soup, options):
     pawns = []
@@ -208,13 +228,13 @@ def pawn_skills(soup, options):
     pawns = all_pawns(soup, options)
     prisoners = all_prisoners(soup)
     changes = []
-    fmt = '  {:15} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12}\n'
-    print(fmt.format('Pawn', *SKILLS))
+    fmt = '  {:27} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12}\n'
+    print(fmt.format('Pawn        mood  injured', *SKILLS))
     def print_pawn(pawn):
-        if pawn.resistance:
-            name = "{} ({:.0f})".format(pawn.name, pawn.resistance)
+        if pawn.resistance > -1:
+            name = "{:10} ({: >3.0f}) {}".format(pawn.name, pawn.resistance, pawn.health)
         elif pawn.mood:
-            name = "{} ({:.1f})".format(pawn.name, pawn.mood)
+            name = "{:10} ({: >3.1f}) {}".format(pawn.name, pawn.mood, pawn.health)
         else:
             name = pawn.name
         items = [name,]
@@ -418,6 +438,8 @@ def equipment_list(soup, options):
                     armor_level += 2
                 if item.max_key in ('DevilstrandCloth Duster', 'DevilstrandCloth Parka',):
                     armor_level += 1
+                if item.max_key in ('Hyperweave Duster', 'Hyperweave Parka',):
+                    armor_level += 2
                 people[key].append("{}".format(item.name))
             people[key].sort()
 
@@ -485,22 +507,40 @@ def quests(soup):
                 print(untag(attribute(li, 'description')))
                 print('='*25)
 
+class Bill:
+    def __init__(self, bill_node):
+        self.suspended = attribute(bill_node, 'suspended') == 'True'
+        self.recipe = attribute(bill_node, 'recipe')
+        self.repeat_type = attribute(bill_node, 'repeatmode')
+        if self.repeat_type == 'TargetCount':
+            self.count = int(attribute(bill_node, 'targetcount', 0))
+        elif attribute(bill_node, 'repeatmode') == 'RepeatCount':
+            self.count = int(attribute(bill_node, 'repeatcount', 0))
+        elif attribute(bill_node, 'repeatmode') == 'Forever':
+            self.count = -1
+
+    @property
+    def formatted_recipe(self):
+        recipe = self.recipe
+        recipe = recipe.split('_')[-1]
+        recipe = re.sub(r'StoneBlocks(.*)', r'\1 Blocks', recipe)
+        recipe = recipe.replace('Bulk', ' (x4)')
+        recipe = recipe.replace('CookMealFine', 'FineMeal')
+        recipe = recipe.replace('MedicineIndustrial', 'Medicine')
+        recipe = re.sub(r'([a-z])([A-Z])', r'\1 \2', recipe)
+        return recipe
+
+    def __lt__(self, other):
+        return self.recipe < other.recipe
+
+
 def queue(soup):
     basins = Counter()
     crops = Counter()
     repeat_bills = []
     target_bills = []
     forever_bills = []
-    def formatted_recipe(bill):
-        recipe = attribute(bill, 'recipe')
-        recipe = recipe.split('_')[-1]
-        recipe = re.sub(r'StoneBlocks(.*)', r'\1 Blocks', recipe)
-        recipe = recipe.replace('Bulk', ' (x4)')
-        recipe = recipe.replace('CookMealFine', 'FineMeal')
-        recipe = recipe.replace('MedicineIndustrial', 'Medicine')        
-        recipe = re.sub(r'([a-z])([A-Z])', r'\1 \2', recipe)
-        return recipe
-        
+
     for thing in soup.find_all('thing'):
         try:
             rimworld_category = classname(thing)[0]
@@ -516,23 +556,23 @@ def queue(soup):
         if attribute(thing, 'sown') == 'True':
             crops[name.replace('Plant_', '')] += 1
         for stack in thing.find_all('bills'):
-            for bill in stack.find_all('li', recursive=False):
-                if attribute(bill, 'suspended') == 'True':
+            for bill_node in stack.find_all('li', recursive=False):
+                bill = Bill(bill_node)
+                if bill.suspended:
                     continue
-                repeat_count = int(attribute(bill, 'repeatcount', 0))
-                if not repeat_count:
+                if bill.count == 0:
                     continue
-                recipe = formatted_recipe(bill)
-                if attribute(bill, 'repeatmode') == 'TargetCount':
-                    target_bills.append((recipe, int(attribute(bill, 'targetcount', 0),)))
-                elif attribute(bill, 'repeatmode') == 'RepeatCount':
-                    repeat_bills.append((recipe, repeat_count))
-                elif attribute(bill, 'repeatmode') == 'Forever':
-                    forever_bills.append((recipe, 'forever',))
+                if  bill.repeat_type == 'TargetCount':
+                    target_bills.append(bill)
+                elif bill.repeat_type == 'RepeatCount':
+                    repeat_bills.append(bill)
+                elif bill.repeat_type == 'Forever':
+                    forever_bills.append(bill)
     if basins:
         print('Basins')
         for basin in sorted(basins):
             print(f"  {basin:15}: {basins[basin]:4}")
+        print()
     if crops:
         print('Crops')
         for crop in sorted(crops):
@@ -540,18 +580,21 @@ def queue(soup):
             count = crops[crop] - in_basin
             if count > 0:
                 print(f"  {crop:15}: {count:4}")
+        print()
     if repeat_bills:
         print('Bills')
-        for bill in sorted(repeat_bills, key=lambda x: x[0]):
-            print(f"  {bill[0]:25}: {bill[1]:4}")
+        for bill in sorted(repeat_bills):
+            print(f"  {bill.formatted_recipe:20}: {bill.count:3}")
+        print()
     if target_bills:
         print('Bills with Target')
-        for bill in sorted(target_bills, key=lambda x: x[0]):
-            print(f"  {bill[0]:25}: {bill[1]:4}")
+        for bill in sorted(target_bills):
+            print(f"  {bill.formatted_recipe:20}: {bill.count:3}")
+        print()
     if forever_bills:
         print('Repeat Forever')
-        for bill in sorted(forever_bills, key=lambda x: x[0]):
-            print(f"  {bill[0]}")
+        for bill in sorted(forever_bills):
+            print(f"  {bill.formatted_recipe}")
 
 def test(soup, options):
     """
