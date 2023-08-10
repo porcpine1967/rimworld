@@ -41,7 +41,7 @@ SKILL_UPGRADE = {
     20: 32000,
 }
 
-PARTS = {
+BODY_PARTS = {
     '7': 'Left Lung',
     '8': 'Right Lung',
     '16': 'Left Eye',
@@ -51,6 +51,24 @@ PARTS = {
     '55': 'Right Leg',
     '60': 'Right Toe',
 }
+
+APPAREL_LOCATION = (
+    ('Helmet', 'head',),
+    ('Tuque', 'head',),
+    ('Hat', 'head',),
+    ('Headress', 'head',),
+    ('Veil', 'head',),
+    ('Mask', 'head',),
+    ('TribalA', 'skin-top',),
+    ('Shirt', 'skin-top',),
+    ('Pants', 'skin-bottom',),
+    ('Belt', 'belt',),
+    ('Duster', 'outer',),
+    ('Jacket', 'outer',),
+    ('Parka', 'outer',),
+    ('FlakVest', 'middle',),
+    ('Armor', 'middle',),
+)
 
 def classname(node):
     for k, v in node.attrs.items():
@@ -125,13 +143,35 @@ def wildlife(soup):
     for animal in sorted(animals):
         print("{},{}".format(animal, animals[animal]))
 
+class MockThing:
+    def __init__(self):
+        self.name = self.base_name = self.max_key = ''
+
 class Pawn:
+    ITEM_CATEGORIES =  ('head',
+            'skin-top',
+            'skin-bottom',
+            'middle',
+            'outer',
+            'belt',
+            'weapon',
+            'medicine',
+        )
+
     def __init__(self, thing, options):
         self.name = attribute(thing, ('name', 'nick',)) or attribute( thing, ('name', 'first'))
         self.changes = []
         self.thing = thing
         self.permanent_injuries = []
+        self.items = defaultdict(MockThing)
+        self.skills = defaultdict(dict)
 
+        self.load_skills(thing, options)
+        self.load_injuries(thing)
+        self.load_mood(thing)
+        self.load_equipment(thing)
+
+    def load_skills(self, thing, options):
         track_changes = False
         olds = {}
         try:
@@ -141,7 +181,6 @@ class Pawn:
         except AttributeError:
             for skill in SKILLS:
                 olds[skill] = '0'
-        self.skills = defaultdict(dict)
         for skill in thing.skills.find_all('li'):
             skillname =  attribute(skill, 'def')
             if skillname:
@@ -158,13 +197,16 @@ class Pawn:
                         change = int(level) - int(olds[skillname])
                         if change:
                             self.changes.append('{:+} {} ({})'.format(change, skillname, level))
+        options[self.name] =  ','.join(self.skill_list[1:])
+
+    def load_injuries(self, thing):
         self.injury_count = self.max_severity = 0
         for tracker in thing.find_all('healthtracker'):
             for issue in tracker.find_all('li'):
                 issue_def = attribute(issue, 'def')
                 if attribute(issue, 'ispermanent'):
                     part_number = attribute(issue, ('part', 'index',))
-                    part = part_number in PARTS and PARTS[part_number] or part_number
+                    part = part_number in BODY_PARTS and BODY_PARTS[part_number] or part_number
 
                     self.permanent_injuries.append((f"Injured {part}",
                                                     float(attribute(issue, 'severity', 0)),))
@@ -172,7 +214,7 @@ class Pawn:
                 if issue_def in ('MissingBodyPart', 'Asthma',):
                     issue_name = issue_def == 'Asthma' and 'Asthma' or 'Missing'
                     part_number = attribute(issue, ('part', 'index',))
-                    part = part_number in PARTS and PARTS[part_number] or part_number
+                    part = part_number in BODY_PARTS and BODY_PARTS[part_number] or part_number
                     if not attribute(issue, 'lastinjury') == 'SurgicalCut':
                         self.permanent_injuries.append((f"{issue_name} {part}",
                                                         float(attribute(issue, 'severity', 0)),))
@@ -187,6 +229,8 @@ class Pawn:
                     continue
                 self.injury_count += 1
                 self.max_severity = max([self.max_severity, float(attribute(issue, 'severity', 0))])
+
+    def load_mood(self, thing):
         self.resistance = -1
         self.mood = 0
         if thing.guest.gueststatus and thing.guest.gueststatus.text == 'Prisoner':
@@ -196,7 +240,72 @@ class Pawn:
                 self.mood = float(attribute(thing, ('needs', 'needs', 'li', 'curlevel',)))
             except ValueError:
                 pass
-        options[self.name] =  ','.join(self.skill_list[1:])
+
+    def load_equipment(self, thing):
+        for li in thing.apparel.find_all('li'):
+            item = Thing(li)
+            for name, place in APPAREL_LOCATION:
+                if name in item.name:
+                    self.items[place] = item
+                    break
+        for li in thing.equipment.find_all('li'):
+            item = Thing(li)
+            if item.name:
+                self.items['weapon'] = item
+
+        for li in thing.inventory.find_all('li'):
+            item_def = attribute(li, 'def', '')
+            if item_def.startswith('Medicine'):
+                count = attribute(li, 'stackcount')
+                item = MockThing()
+                if item_def == 'MedicineHerbal':
+                    item.name = f"Herbal Med:     {count}"
+                elif item_def == 'MedicineIndustrial':
+                    item.name = f"Medicine:       {count}"
+                elif item_def == 'MedicineUltratech':
+                    item.name = f"Glitter Med:    {count}"
+                self.items['medicine'] = item
+
+    @property
+    def armor_level(self):
+        _armor_level = 0
+        for item in self.items.values():
+            for armor_type in ('Flak', 'Helmet', 'Shield',):
+                if armor_type in item.name:
+                    _armor_level += 1
+            if item.base_name in ('ArmorRecon', 'PowerArmor'):
+                _armor_level += 2
+            if item.max_key in ('DevilstrandCloth Duster', 'DevilstrandCloth Parka',):
+                _armor_level += 1
+            if item.max_key in ('Hyperweave Duster', 'Hyperweave Parka',):
+                _armor_level += 2
+        return _armor_level
+
+    @property
+    def combat_info(self):
+        if 'weapon' not in self.items:
+            combat_role = ''
+        else:
+            combat_role = self.items['weapon'].category
+
+        _combat_info = ''
+        if self.skills['Shooting']['level'] == 'X' and self.skills['Melee']['level'] == 'X':
+            _combat_info = '(Non Violent)'
+        elif combat_role in ('Gun', 'Grenade',):
+            _combat_info = '(Range - {})'.format(self.skills['Shooting']['level'])
+        elif combat_role in ('MeleeWeapon',):
+            _combat_info = '(Melee - {})'.format(self.skills['Melee']['level'])
+        elif not self.items['weapon']:
+            _combat_info = '** UNARMED **'
+        return _combat_info
+
+    @property
+    def max_equipment_description(self):
+        max_length = 0
+        for item in self.items.values():
+            max_length = max(max_length, len(item.name))
+        return max_length
+
     @property
     def skill_list(self):
         l = [self.name, ]
@@ -452,77 +561,44 @@ def inventory_list(soup):
 
 def equipment_list(soup, options):
     things_in_inventory(soup) # load Thing.maxes
-    armors = ('Flak', 'Helmet', )
-    people = defaultdict(list)
-    max_width = 0
+    pawns = []
     def add_pawn(thing):
-        max_width = 0
         if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') in COLONIST_FACTIONS:
-            pawn = Pawn(thing, options)
-            armor_level = 0
-            key = attribute(thing, ('name', 'nick',)) or attribute(thing, ('name', 'first',))
-            armed = False
-            combat_role = ''
-            for li in thing.apparel.find_all('li'):
-                item = Thing(li)
-                max_width = max(max_width, len(item.name))
-                for a in armors:
-                    if a in item.name:
-                        armor_level += 1
-                if item.base_name in ('ArmorRecon', 'PowerArmor'):
-                    armor_level += 2
-                if item.max_key in ('DevilstrandCloth Duster', 'DevilstrandCloth Parka',):
-                    armor_level += 1
-                if item.max_key in ('Hyperweave Duster', 'Hyperweave Parka',):
-                    armor_level += 2
-                people[key].append(item.name)
-            people[key].sort()
+            pawns.append(Pawn(thing, options))
 
-            for li in thing.equipment.find_all('li'):
-                weapon = attribute(li, 'def')
-                if weapon:
-                    armed = True
-                    item = Thing(li)
-                    people[key].append(item.name)
-                    combat_role = item.category
-            combat_info = ''
-            if pawn.skills['Shooting']['level'] == 'X' and pawn.skills['Melee']['level'] == 'X':
-                combat_info = '(Non Violent)'
-            elif combat_role in ('Gun', 'Grenade',):
-                combat_info = '(Range - {})'.format(pawn.skills['Shooting']['level'])
-            elif combat_role in ('MeleeWeapon',):
-                combat_info = '(Melee - {})'.format(pawn.skills['Melee']['level'])
-            elif not armed:
-                people[key].append('** UNARMED **')
-
-            people[key].insert(0, 'Armor Level: {:2} {}'.format(armor_level, combat_info))
-            for _ in range(len(people[key]), 8):
-                people[key].append('')
-
-        return max_width + 6
     for alivepawns in soup.find_all('pawnsalive'):
         for thing in alivepawns.findChildren('li', recursive=False):
-            max_width = max(max_width, add_pawn(thing))
+            add_pawn(thing)
 
     for thing in soup.find_all('thing'):
-        max_width = max(max_width, add_pawn(thing))
-    def chunker(dictionary, size):
-        seq = sorted([key for key in dictionary.keys()])
+        add_pawn(thing)
+
+    max_width = 0
+    for pawn in pawns:
+        max_width = max(max_width, pawn.max_equipment_description)
+
+    max_width += 6
+
+    def chunker(seq, size):
         return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
     try:
         num_columns = math.floor(os.get_terminal_size()[0]/(max_width))
 
-        for person_chunk in chunker(people, num_columns):
-            fmt = f"{{:{max_width}}}"*len(person_chunk)
-            print(fmt.format(*[person for person in person_chunk]))
-            for i in range(8):
-                print(fmt.format(*[f"    {people[person][i]}" for person in person_chunk]))
+        for pawn_chunk in chunker(sorted(pawns, key=lambda x: x.name), num_columns):
+            fmt = f"{{:{max_width}}}"*len(pawn_chunk)
+            print(fmt.format(*[pawn.name for pawn in pawn_chunk]))
+            print(fmt.format(*[f"    Armor Level: {pawn.armor_level:2} {pawn.combat_info}" for pawn in pawn_chunk]))
+            for key in Pawn.ITEM_CATEGORIES:
+                print(fmt.format(*[f"    {pawn.items[key].name}" for pawn in pawn_chunk]))
             print()
+
     except OSError:
-        for person in sorted(people):
-            print(person)
-            for item in people[person]:
-                print("    {}".format(item))
+        for pawn in sorted(pawns, key=lambda x: x.name):
+            print(pawn.name)
+            print(f"    Armor Level: {pawn.armor_level:2} {pawn.combat_info}")
+            for item in pawn.items.values():
+                print("    {}".format(item.name))
 
 def harvest(soup):
     herbs = Counter()
