@@ -4,6 +4,8 @@ from argparse import ArgumentParser
 from configparser import ConfigParser
 from collections import Counter, defaultdict
 import csv
+import math
+import os
 import re
 
 from bs4 import BeautifulSoup
@@ -37,6 +39,17 @@ SKILL_UPGRADE = {
     18: 28000,
     19: 30000,
     20: 32000,
+}
+
+PARTS = {
+    '7': 'Left Lung',
+    '8': 'Right Lung',
+    '16': 'Left Eye',
+    '25': 'Left Arm',
+    '33': 'Left Thumb',
+    '46': 'Left Leg',
+    '55': 'Right Leg',
+    '60': 'Right Toe',
 }
 
 def classname(node):
@@ -117,6 +130,7 @@ class Pawn:
         self.name = attribute(thing, ('name', 'nick',)) or attribute( thing, ('name', 'first'))
         self.changes = []
         self.thing = thing
+        self.permanent_injuries = []
 
         track_changes = False
         olds = {}
@@ -148,10 +162,28 @@ class Pawn:
         for tracker in thing.find_all('healthtracker'):
             for issue in tracker.find_all('li'):
                 issue_def = attribute(issue, 'def')
-                if issue_def in ('', 'Asthma', 'MissingBodyPart',)\
+                if attribute(issue, 'ispermanent'):
+                    part_number = attribute(issue, ('part', 'index',))
+                    part = part_number in PARTS and PARTS[part_number] or part_number
+
+                    self.permanent_injuries.append((f"Injured {part}",
+                                                    float(attribute(issue, 'severity', 0)),))
+                    continue
+                if issue_def in ('MissingBodyPart', 'Asthma',):
+                    issue_name = issue_def == 'Asthma' and 'Asthma' or 'Missing'
+                    part_number = attribute(issue, ('part', 'index',))
+                    part = part_number in PARTS and PARTS[part_number] or part_number
+                    if not attribute(issue, 'lastinjury') == 'SurgicalCut':
+                        self.permanent_injuries.append((f"{issue_name} {part}",
+                                                        float(attribute(issue, 'severity', 0)),))
+                    continue
+                if issue_def.endswith('Addiction'):
+                    self.permanent_injuries.append((issue_def,
+                                                   float(attribute(issue, 'severity', 0)),))
+                    continue
+                if issue_def == ''\
                    or issue_def.startswith('Bionic')\
-                   or issue_def.startswith('Smokeleaf')\
-                   or attribute(issue, 'ispermanent'):
+                   or issue_def.endswith('Tolerance'):
                     continue
                 self.injury_count += 1
                 self.max_severity = max([self.max_severity, float(attribute(issue, 'severity', 0))])
@@ -422,7 +454,9 @@ def equipment_list(soup, options):
     things_in_inventory(soup) # load Thing.maxes
     armors = ('Flak', 'Helmet', )
     people = defaultdict(list)
+    max_width = 0
     def add_pawn(thing):
+        max_width = 0
         if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') in COLONIST_FACTIONS:
             pawn = Pawn(thing, options)
             armor_level = 0
@@ -431,6 +465,7 @@ def equipment_list(soup, options):
             combat_role = ''
             for li in thing.apparel.find_all('li'):
                 item = Thing(li)
+                max_width = max(max_width, len(item.name))
                 for a in armors:
                     if a in item.name:
                         armor_level += 1
@@ -440,7 +475,7 @@ def equipment_list(soup, options):
                     armor_level += 1
                 if item.max_key in ('Hyperweave Duster', 'Hyperweave Parka',):
                     armor_level += 2
-                people[key].append("{}".format(item.name))
+                people[key].append(item.name)
             people[key].sort()
 
             for li in thing.equipment.find_all('li'):
@@ -460,17 +495,34 @@ def equipment_list(soup, options):
             elif not armed:
                 people[key].append('** UNARMED **')
 
-            people[key].insert(0, 'Armor Level: {} {}'.format(armor_level, combat_info))
+            people[key].insert(0, 'Armor Level: {:2} {}'.format(armor_level, combat_info))
+            for _ in range(len(people[key]), 8):
+                people[key].append('')
+
+        return max_width + 6
     for alivepawns in soup.find_all('pawnsalive'):
         for thing in alivepawns.findChildren('li', recursive=False):
-            add_pawn(thing)
+            max_width = max(max_width, add_pawn(thing))
 
     for thing in soup.find_all('thing'):
-        add_pawn(thing)
-    for person in sorted(people):
-        print(person)
-        for item in people[person]:
-            print("    {}".format(item))
+        max_width = max(max_width, add_pawn(thing))
+    def chunker(dictionary, size):
+        seq = sorted([key for key in dictionary.keys()])
+        return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+    try:
+        num_columns = math.floor(os.get_terminal_size()[0]/(max_width))
+
+        for person_chunk in chunker(people, num_columns):
+            fmt = f"{{:{max_width}}}"*len(person_chunk)
+            print(fmt.format(*[person for person in person_chunk]))
+            for i in range(8):
+                print(fmt.format(*[f"    {people[person][i]}" for person in person_chunk]))
+            print()
+    except OSError:
+        for person in sorted(people):
+            print(person)
+            for item in people[person]:
+                print("    {}".format(item))
 
 def harvest(soup):
     herbs = Counter()
@@ -533,6 +585,12 @@ class Bill:
     def __lt__(self, other):
         return self.recipe < other.recipe
 
+def injuries(soup, options):
+    for pawn in sorted(all_pawns(soup, options), key=lambda x: x.name):
+        if pawn.permanent_injuries:
+            print(pawn.name)
+            for name, severity in pawn.permanent_injuries:
+                print(f"  {name:20} {severity:.2f}")
 
 def queue(soup):
     basins = Counter()
@@ -623,6 +681,8 @@ def run(args):
         harvest(soup)
     elif args.action == 'dead':
         all_dead(soup)
+    elif args.action == 'injury':
+        injuries(soup, options)
     elif args.action == 'quests':
         quests(soup)
     elif args.action == 'queue':
@@ -632,6 +692,6 @@ def run(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests', 'queue', 'test',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests', 'queue', 'injury', 'test',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
