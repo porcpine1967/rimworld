@@ -7,6 +7,7 @@ import csv
 import math
 import os
 import re
+import statistics
 
 from bs4 import BeautifulSoup
 
@@ -647,6 +648,10 @@ class Bill:
         elif attribute(bill_node, 'repeatmode') == 'Forever':
             self.count = -1
 
+        self.materials = []
+        for li in bill_node.ingredientfilter.alloweddefs.find_all('li'):
+            self.materials.append(li.text)
+
     @property
     def formatted_recipe(self):
         recipe = self.recipe
@@ -656,6 +661,8 @@ class Bill:
         recipe = recipe.replace('CookMealFine', 'FineMeal')
         recipe = recipe.replace('MedicineIndustrial', 'Medicine')
         recipe = re.sub(r'([a-z])([A-Z])', r'\1 \2', recipe)
+        if 'Apparel' in self.recipe and len(self.materials) == 1:
+            recipe = f"{self.materials[0]} {recipe}"
         return recipe
 
     def __lt__(self, other):
@@ -668,27 +675,43 @@ def injuries(soup, options):
             for name, severity in pawn.permanent_injuries:
                 print(f"  {name:20} {severity:.2f}")
 
+def hydroponics_positions(thing):
+    x, y = position(thing)
+    rot = attribute(thing, 'rot')
+    if not rot:
+        return ((x, y - 1,), (x, y,), (x, y + 1,), (x, y + 2,),)
+    if rot == '2':
+        return ((x, y - 2,), (x, y - 1,), (x, y,), (x, y + 1,),)
+    if rot == '1':
+        return ((x - 1, y,), (x, y,), (x + 1, y,), (x + 2, y,),)
+    if rot == '3':
+        return ((x - 2, y,), (x - 1, y,), (x, y,), (x + 1, y,),)
+
 def queue(soup):
     basins = Counter()
     crops = Counter()
     repeat_bills = []
     target_bills = []
     forever_bills = []
+    growths = defaultdict(list)
+    hydroponics_zones = []
 
     for thing in soup.find_all('thing'):
-        try:
-            rimworld_category = classname(thing)[0]
-        except IndexError:
-            continue
-        name = attribute(thing, 'def')
-        if name == 'HydroponicsBasin':
+        if attribute(thing, 'def') == 'HydroponicsBasin':
             if attribute(thing, 'poweron') == 'False':
                 plant = 'Off'
             else:
                 plant = attribute(thing, 'plantdeftogrow').replace('Plant_', '')
             basins[plant] += 1
+            hydroponics_zones.extend(hydroponics_positions(thing))
+    for thing in soup.find_all('thing'):
+        name = attribute(thing, 'def')
         if attribute(thing, 'sown') == 'True':
-            crops[name.replace('Plant_', '')] += 1
+            x, y = position(thing)
+            if (x, y,) not in hydroponics_zones:
+                name = name.replace('Plant_', '')
+                crops[name] += 1
+                growths[name].append(float(attribute(thing, 'growth', 0)))
         for stack in thing.find_all('bills'):
             for bill_node in stack.find_all('li', recursive=False):
                 bill = Bill(bill_node)
@@ -710,10 +733,9 @@ def queue(soup):
     if crops:
         print('Crops')
         for crop in sorted(crops):
-            in_basin = basins[crop] * 4
-            count = crops[crop] - in_basin
+            count = crops[crop]
             if count > 0:
-                print(f"  {crop:15}: {count:4}")
+                print(f"  {crop:15}: {count:4} ({statistics.mean(growths[crop]):.2f}, {statistics.median(growths[crop]):.2f})")
         print()
     if repeat_bills:
         print('Bills')
