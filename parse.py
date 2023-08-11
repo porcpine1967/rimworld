@@ -689,12 +689,20 @@ def hydroponics_positions(thing):
 
 def queue(soup):
     basins = Counter()
+    basin_crops = Counter()
     crops = Counter()
     repeat_bills = []
     target_bills = []
     forever_bills = []
+    basin_growths = defaultdict(list)
     growths = defaultdict(list)
     hydroponics_zones = []
+    mine_ctr = 0
+
+    for designations in soup.find_all('alldesignations'):
+        for li in designations.find_all('li'):
+            if attribute(li, 'def') == 'Mine':
+                mine_ctr += 1
 
     for thing in soup.find_all('thing'):
         if attribute(thing, 'def') == 'HydroponicsBasin':
@@ -708,8 +716,11 @@ def queue(soup):
         name = attribute(thing, 'def')
         if attribute(thing, 'sown') == 'True':
             x, y = position(thing)
-            if (x, y,) not in hydroponics_zones:
-                name = name.replace('Plant_', '')
+            name = name.replace('Plant_', '')
+            if (x, y,) in hydroponics_zones:
+                basin_crops[name] += 1
+                basin_growths[name].append(float(attribute(thing, 'growth', 0)))
+            else:
                 crops[name] += 1
                 growths[name].append(float(attribute(thing, 'growth', 0)))
         for stack in thing.find_all('bills'):
@@ -734,8 +745,13 @@ def queue(soup):
         print('Crops')
         for crop in sorted(crops):
             count = crops[crop]
-            if count > 0:
-                print(f"  {crop:15}: {count:4} ({statistics.mean(growths[crop]):.2f}, {statistics.median(growths[crop]):.2f})")
+            print(f"  {crop:15}: {count:4} ({statistics.mean(growths[crop]):.2f}, {max(growths[crop]):.2f})")
+        print()
+    if basin_crops:
+        print('Basin Crops')
+        for crop in sorted(basin_crops):
+            count = basin_crops[crop]
+            print(f"  {crop:15}: {count:4} ({statistics.mean(basin_growths[crop]):.2f}, {max(basin_growths[crop]):.2f})")
         print()
     if repeat_bills:
         print('Bills')
@@ -752,6 +768,9 @@ def queue(soup):
         for bill in sorted(forever_bills):
             print(f"  {bill.formatted_recipe}")
 
+    if mine_ctr:
+        print()
+        print(f"{mine_ctr} mines")
 def test(soup, options):
     """
     For ad hoc
