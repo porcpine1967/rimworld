@@ -455,6 +455,8 @@ class Thing:
         elif name.startswith('Raw'):
             self.category = 'Raw Food'
             name = name[3:]
+        elif name == 'Pemmican':
+            self.category = 'Meal'
         elif '_' in name:
             self.category, name = name.split('_', 1)
 
@@ -507,6 +509,7 @@ class Thing:
 
             n += ')'
         return n
+
 def ancient_danger_zone(soup):
     """ Coordinates around all ancient cryptosleep caskets +/- 5"""
     top = left = 250 # max position = 249
@@ -552,13 +555,42 @@ def things_in_inventory(soup):
             inventory[obj.category][obj.name] += obj.count
     return inventory
 
+class CounterIterator:
+    def __init__(self, ctr):
+        self.ctr = ctr
+
+    def nth(self, idx):
+        for index, item_name in enumerate(sorted(self.ctr)):
+            if index == idx:
+                return f" {item_name}: {self.ctr[item_name]}"
+        return ''
+
 def inventory_list(soup):
     inventory = things_in_inventory(soup)
-    for c in sorted(inventory):
-        print(c)
-        for k in sorted(inventory[c]):
-            v = inventory[c][k]
-            print(' {}: {}'.format(k, v))
+    max_width = 0
+    for c, k in inventory.items():
+        max_width = max(max_width, len(c))
+        for item, count in k.items():
+            max_width = max(max_width, len(f" {item}: {count}"))
+    max_width += 4
+    try:
+        num_columns = math.floor(os.get_terminal_size()[0]/(max_width))
+
+        for category_chunk in chunker(sorted(inventory), num_columns):
+            fmt = f"{{:{max_width}}}"*len(category_chunk)
+            print(fmt.format(*[category for category in category_chunk]))
+            max_count = 0
+            for category in category_chunk:
+                max_count = max(max_count, len(inventory[category].values()))
+            for index in range(max_count):
+                print(fmt.format(*[CounterIterator(inventory[category]).nth(index) for category in category_chunk]))
+            print()
+    except OSError:
+        for c in sorted(inventory):
+            print(c)
+            for k in sorted(inventory[c]):
+                v = inventory[c][k]
+                print(' {}: {}'.format(k, v))
 
 def equipment_list(soup, options):
     things_in_inventory(soup) # load Thing.maxes
@@ -580,9 +612,6 @@ def equipment_list(soup, options):
 
     max_width += 6
 
-    def chunker(seq, size):
-        return (seq[pos:pos + size] for pos in range(0, len(seq), size))
-
     try:
         num_columns = math.floor(os.get_terminal_size()[0]/(max_width))
 
@@ -600,6 +629,9 @@ def equipment_list(soup, options):
             print(f"    Armor Level: {pawn.armor_level:2} {pawn.combat_info}")
             for item in pawn.items.values():
                 print("    {}".format(item.name))
+
+def chunker(seq, size):
+    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 def harvest(soup):
     herbs = Counter()
