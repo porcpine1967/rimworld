@@ -647,30 +647,49 @@ def chunker(seq, size):
     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 def harvest(soup):
-    herbs = Counter()
-    berries = Counter()
-    geysers = Counter()
+    counters = {
+        'herbs': Counter(),
+        'berries': Counter(),
+        'trees': Counter(),
+        'geysers': Counter(),
+        'ambrosia': Counter(),
+    }
     for thing in soup.find_all('thing'):
         name = attribute(thing, 'def')
 
         if name == 'SteamGeyser':
-            geysers[location(thing)] += 1
+            counters['geysers'][location(thing)] += 1
             continue
 
         growth = attribute(thing, 'growth')
         if not growth == '1':
             continue
 
-        if name == 'Plant_Berry':
-            berries[location(thing)] += 1
-        elif name == 'Plant_TreeDrago':
-            herbs[location(thing)] += 1
-
-    print('Herbs/Berries/Geysers')
+        if name in ('Plant_Berry', 'Plant_Agave',):
+            counters['berries'][location(thing)] += 1
+        elif name in ('HealrootWild',):
+            counters['herbs'][location(thing)] += 1
+        elif name in ('Plant_TreeDrago', 'Plant_SaguaroCactus',):
+            counters['trees'][location(thing)] += 1
+        elif name == 'Plant_Ambrosia':
+            counters['ambrosia'][location(thing)] += 1
+    title_list = []
+    data = []
+    formats = []
+    for key, counter in counters.items():
+        if counter:
+            title_list.append(key)
+            data.append(counter)
+            formats.append('{:2}')
+    fmt = f"{'/'.join(formats)} | {'/'.join(formats)} | {'/'.join(formats)}"
+    print('/'.join(title_list))
     for locs in (('NW', 'N', 'NE',), ('W', 'C', 'E',), ('SW', 'S', 'SE',),):
-        print('{:2}/{:2}/{:2} | {:2}/{:2}/{:2} | {:2}/{:2}/{:2}'.format(
-            herbs[locs[0]], berries[locs[0]], geysers[locs[0]], herbs[locs[1]], berries[locs[1]], geysers[locs[1]], herbs[locs[2]], berries[locs[2]], geysers[locs[2]],
-            ))
+        data_points = []
+        for loc in locs:
+            for counter in data:
+                data_points.append(counter[loc])
+        print(fmt.format(*data_points))
+
 def quests(soup):
     def untag(string):
         return re.sub(r'(<[^>]+>|\([*/][^)]+\))', '', string).replace('\n\n', '\n')
