@@ -71,6 +71,19 @@ APPAREL_LOCATION = (
     ('Armor', 'middle',),
 )
 
+BASIN_RIPE_ESTIMATES = {
+    'Cotton': 5,
+    'Healroot': 5,
+    'Rice': 2,
+    'Smokeleaf': 5,
+}
+RIPE_ESTIMATES = {
+    'Corn': 21,
+    'Devilstrand': 42,
+    'Haygrass': 13,
+    'Rice': 6,
+}
+
 def classname(node):
     for k, v in node.attrs.items():
         if k.lower() == 'class':
@@ -777,13 +790,27 @@ def queue(soup):
         print('Crops')
         for crop in sorted(crops):
             count = crops[crop]
-            print(f"  {crop:15}: {count:4} ({statistics.mean(growths[crop]):.2f}, {max(growths[crop]):.2f})")
+            if crop in RIPE_ESTIMATES:
+                estimate = RIPE_ESTIMATES[crop]
+                mean = f"{statistics.mean([estimate*(1 - growth) for growth in growths[crop]]): >4.1f}"
+                maximum = f"{min([estimate*(1 - growth) for growth in growths[crop]]): >4.1f}"
+            else:
+                mean = f"{statistics.mean(growths[crop]):.2f}"
+                maximum = f"{max(growths[crop]):.2f}"
+            print(f"  {crop:15}: {count:4} ({mean}, {maximum})")
         print()
     if basin_crops:
         print('Basin Crops')
         for crop in sorted(basin_crops):
             count = basin_crops[crop]
-            print(f"  {crop:15}: {count:4} ({statistics.mean(basin_growths[crop]):.2f}, {max(basin_growths[crop]):.2f})")
+            if crop in BASIN_RIPE_ESTIMATES:
+                estimate = BASIN_RIPE_ESTIMATES[crop]
+                mean = f"{statistics.mean([estimate*(1 - growth) for growth in basin_growths[crop]]): >4.1f}"
+                maximum = f"{min([estimate*(1 - growth) for growth in basin_growths[crop]]): >4.1f}"
+            else:
+                mean = f"{statistics.mean(basin_growths[crop]):.2f}"
+                maximum = f"{max(basin_growths[crop]):.2f}"
+            print(f"  {crop:15}: {count:4} ({mean}, {maximum})")
         print()
     if repeat_bills:
         print('Bills')
