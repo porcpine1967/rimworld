@@ -43,11 +43,18 @@ SKILL_UPGRADE = {
 }
 
 BODY_PARTS = {
+    '0': 'Torso',
+    '1': 'Ribcage',
+    '2': 'Sternum',
     '7': 'Left Lung',
     '8': 'Right Lung',
+    '11': 'Liver',
     '16': 'Left Eye',
     '25': 'Left Arm',
+    '26': 'Left humerus',
+    '27': 'Left radius',
     '33': 'Left Thumb',
+    '36': 'Right arm',
     '46': 'Left Leg',
     '55': 'Right Leg',
     '60': 'Right Toe',
@@ -177,8 +184,10 @@ class Pawn:
         self.changes = []
         self.thing = thing
         self.permanent_injuries = []
+        self.temporary_injuries = []
         self.items = defaultdict(MockThing)
         self.skills = defaultdict(dict)
+        self.missing_body_parts = set()
 
         self.load_skills(thing, options)
         self.load_injuries(thing)
@@ -214,17 +223,9 @@ class Pawn:
         options[self.name] =  ','.join(self.skill_list[1:])
 
     def load_injuries(self, thing):
-        self.injury_count = self.max_severity = 0
         for tracker in thing.find_all('healthtracker'):
             for issue in tracker.find_all('li'):
                 issue_def = attribute(issue, 'def')
-                if attribute(issue, 'ispermanent'):
-                    part_number = attribute(issue, ('part', 'index',))
-                    part = part_number in BODY_PARTS and BODY_PARTS[part_number] or part_number
-
-                    self.permanent_injuries.append((f"Injured {part}",
-                                                    float(attribute(issue, 'severity', 0)),))
-                    continue
                 if issue_def in ('MissingBodyPart', 'Asthma',):
                     issue_name = issue_def == 'Asthma' and 'Asthma' or 'Missing'
                     part_number = attribute(issue, ('part', 'index',))
@@ -241,8 +242,27 @@ class Pawn:
                    or issue_def.startswith('Bionic')\
                    or issue_def.endswith('Tolerance'):
                     continue
-                self.injury_count += 1
-                self.max_severity = max([self.max_severity, float(attribute(issue, 'severity', 0))])
+                part_number = attribute(issue, ('part', 'index',))
+                if part_number in BODY_PARTS:
+                    part = BODY_PARTS[part_number]
+                else:
+                    self.missing_body_parts.add(part_number)
+                    part = part_number
+
+                if attribute(issue, 'ispermanent'):
+                    self.permanent_injuries.append((f"Injured {part}",
+                                                    float(attribute(issue, 'severity', 0)),))
+                else:
+                    self.temporary_injuries.append((f"Injured {part}",
+                                                    float(attribute(issue, 'severity', 0)),))
+
+    @property
+    def injury_count(self):
+        return len(self.temporary_injuries)
+
+    @property
+    def max_severity(self):
+        return max([injury[1] for injury in self.temporary_injuries])
 
     def load_mood(self, thing):
         self.resistance = -1
@@ -738,11 +758,17 @@ class Bill:
         return self.recipe < other.recipe
 
 def injuries(soup, options):
+    missing = set()
     for pawn in sorted(all_pawns(soup, options), key=lambda x: x.name):
-        if pawn.permanent_injuries:
+        if pawn.permanent_injuries or pawn.temporary_injuries:
+            missing.update(pawn.missing_body_parts)
             print(pawn.name)
-            for name, severity in pawn.permanent_injuries:
-                print(f"  {name:20} {severity:.2f}")
+            for name, severity in sorted(pawn.temporary_injuries, key=lambda x: x[1], reverse=True):
+                print(f"  {name:20} {severity: >5.2f}")
+            for name, severity in sorted(pawn.permanent_injuries, key=lambda x: x[0]):
+                print(f"\033[38:5:249m  {name:20} {severity: >5.2f}\033[0m")
+    for m in sorted(list(missing)):
+        print(m)
 
 def hydroponics_positions(thing):
     x, y = position(thing)
