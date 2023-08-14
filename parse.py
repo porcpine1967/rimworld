@@ -365,31 +365,38 @@ def all_dead(soup):
                 print(pawn.skill_list)
 
 def pawn_skills(soup, options):
-    def buffers(skill):
+    def buffers(skill, buffer_width):
         length = len(skill)
-        buffer_back = (BUFFER_WIDTH - length) // 2
-        buffer_front = buffer_back + (BUFFER_WIDTH - length) % 2
+        buffer_back = (buffer_width - length) // 2
+        buffer_front = buffer_back + (buffer_width - length) % 2
         return ' '*buffer_front, ' '*buffer_back
-    def format_normal(skill):
-        bf, bb = buffers(skill)
+    def format_normal(skill, buffer_width=BUFFER_WIDTH):
+        bf, bb = buffers(skill, buffer_width)
         return bf + '\033[00m{}\033[00m'.format(skill) + bb
-    def format_minor(skill):
-        bf, bb = buffers(skill)
+    def format_minor(skill, buffer_width=BUFFER_WIDTH):
+        bf, bb = buffers(skill, buffer_width)
         return bf + '\033[92m{}\033[00m'.format(skill) + bb
-    def format_major(skill):
-        bf, bb = buffers(skill)
+    def format_major(skill, buffer_width=BUFFER_WIDTH):
+        bf, bb = buffers(skill, buffer_width)
         return bf + '\033[92m\033[01m{}\033[00m'.format(skill) + bb
 
     pawns = all_pawns(soup, options)
     prisoners = all_prisoners(soup)
     changes = []
-    fmt = '  {:27} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12}\n'
-    print(fmt.format('Pawn        mood  injured', *SKILLS))
+    fmt = '  {:32} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12} {:^12}\n'
+    print(fmt.format('Pawn             mood  injured', *SKILLS))
     def print_pawn(pawn):
         if pawn.resistance > -1:
-            name = "{:10} ({: >3.0f}) {}".format(pawn.name, pawn.resistance, pawn.health)
+            name = "{:15} ({: >3.0f}) {}".format(pawn.name, pawn.resistance, pawn.health)
         elif pawn.mood:
-            name = "{:10} ({: >3.1f}) {}".format(pawn.name, pawn.mood, pawn.health)
+            mood = f"{pawn.mood: >3.1f}"
+            if pawn.mood < .25:
+                mood = format_major(mood, 0)
+            elif pawn.mood < .35:
+                mood = format_minor(mood, 0)
+            else:
+                mood = format_normal(mood, 0)
+            name = "{:15} ({}) {}".format(pawn.name, mood, pawn.health)
         else:
             name = pawn.name
         items = [name,]
@@ -463,9 +470,7 @@ class Thing:
         if name.startswith('Meat_'):
             self.category = 'Raw Food'
             name = 'Meat'
-        elif name.startswith('Egg'):
-            self.category = 'Raw Food'
-        elif name.startswith('Raw'):
+        elif name.startswith('Raw') or name.startswith('Egg'):
             self.category = 'Raw Food'
             name = name[3:]
         elif name == 'Pemmican':
@@ -492,7 +497,8 @@ class Thing:
 
         if self.category in Thing.QUALITY:
             self.stuff = attribute(thing, 'stuff')
-            Thing.maxes[self.max_key] = max(self.health, Thing.maxes[self.max_key])
+            if self.health % 5 == 0:
+                Thing.maxes[self.max_key] = max(self.health, Thing.maxes[self.max_key])
             quality = attribute(thing, 'quality')
             if self.stuff:
                 if self.stuff == 'WoodLog':
@@ -517,9 +523,8 @@ class Thing:
         n = self.base_name
         if self.qualifications:
             n = '{:15} ({}'.format(self.base_name, ', '.join(self.qualifications))
-            if self.health and Thing.maxes[self.max_key] and not Thing.maxes[self.max_key] % 5:
+            if self.health and Thing.maxes[self.max_key]:
                 n += ' {}%'.format(int(100 * self.health / Thing.maxes[self.max_key]))
-
             n += ')'
         return n
 
