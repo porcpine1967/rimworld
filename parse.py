@@ -880,7 +880,27 @@ def queue(soup):
     if mine_ctr:
         print()
         print(f"{mine_ctr} mines")
-def test(soup, options):
+def top(soup, options):
+    top = defaultdict(list)
+    for pawn in all_pawns(soup, options):
+        for skill in SKILLS:
+            try:
+                int(pawn.skills[skill]['level'])
+                top[skill].append((pawn.name, pawn.skills[skill],))
+            except ValueError:
+                pass
+    def formatted_pawn(pawn):
+        name, skill_info = pawn
+        if skill_info['passion'] == 'Major':
+            return f"{name:>20} (\033[92;1m{skill_info['level']:>2}\033[00m)"
+        if skill_info['passion'] == 'Minor':
+            return f"{name:>20} (\033[92m{skill_info['level']:>2}\033[00m)"
+        return f"{name:>20} ({skill_info['level']:>2})"
+    for skill in SKILLS:
+        pawns = sorted(top[skill], key=lambda x: int(x[1]['level']), reverse=True)
+        print(f"{skill:14} {''.join([formatted_pawn(pawn) for pawn in pawns[:4]])}")
+
+def test(soup, option):
     """
     For ad hoc
     """
@@ -913,11 +933,13 @@ def run(args):
         quests(soup)
     elif args.action == 'queue':
         queue(soup)
+    elif args.action == 'top':
+        top(soup, options)
     elif args.action == 'test':
         test(soup, options)
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests', 'queue', 'injury', 'test',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests', 'queue', 'injury', 'top', 'test',], help="skills or inventory")
     args = parser.parse_args()
     run(args)
