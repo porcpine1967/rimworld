@@ -46,17 +46,24 @@ BODY_PARTS = {
     '0': 'Torso',
     '1': 'Ribcage',
     '2': 'Sternum',
+    '4': 'Spine',
     '7': 'Left Lung',
     '8': 'Right Lung',
     '11': 'Liver',
     '16': 'Left Eye',
+    '17': 'Right Eye',
+    '23': 'Left Shoulder',
+    '24': 'Left Clavicle',
     '25': 'Left Arm',
     '26': 'Left humerus',
     '27': 'Left radius',
     '33': 'Left Thumb',
     '36': 'Right arm',
     '46': 'Left Leg',
+    '49': 'Right foot',
     '55': 'Right Leg',
+    '57': 'Right tibia',
+    '58': 'Right foot',
     '60': 'Right Toe',
 }
 
@@ -373,6 +380,9 @@ def all_prisoners(soup):
         if attribute(thing, ('guest', 'gueststatus',)) == 'Prisoner':
             pawn = Pawn(thing, {})
             pawns.append(pawn)
+    for alivepawns in soup.find_all('pawnsalive'):
+        for thing in alivepawns.findChildren('li', recursive=False):
+            add_pawn(thing)
     for thing in soup.find_all('thing'):
         add_pawn(thing)
     return pawns
@@ -759,7 +769,7 @@ class Bill:
 
 def injuries(soup, options):
     missing = set()
-    for pawn in sorted(all_pawns(soup, options), key=lambda x: x.name):
+    def print_injuries(pawn):
         if pawn.permanent_injuries or pawn.temporary_injuries:
             missing.update(pawn.missing_body_parts)
             print(pawn.name)
@@ -767,6 +777,12 @@ def injuries(soup, options):
                 print(f"  {name:20} {severity: >5.2f}")
             for name, severity in sorted(pawn.permanent_injuries, key=lambda x: x[0]):
                 print(f"\033[38:5:249m  {name:20} {severity: >5.2f}\033[0m")
+    for pawn in sorted(all_pawns(soup, options), key=lambda x: x.name):
+        print_injuries(pawn)
+
+    for pawn in sorted(all_prisoners(soup), key=lambda x: x.name):
+        print_injuries(pawn)
+
     for m in sorted(list(missing)):
         print(m)
 
@@ -882,13 +898,19 @@ def queue(soup):
         print(f"{mine_ctr} mines")
 def top(soup, options):
     top = defaultdict(list)
-    for pawn in all_pawns(soup, options):
+    null_skill = {'level': 0, 'passion': None, 'pct': 0}
+    pawn_objs = all_pawns(soup, options)
+    useful = {}
+    half_useful = {}
+    for pawn in pawn_objs:
+        useful[pawn.name] = []
+        half_useful[pawn.name] = []
         for skill in SKILLS:
             try:
                 int(pawn.skills[skill]['level'])
                 top[skill].append((pawn.name, pawn.skills[skill],))
             except ValueError:
-                pass
+                top[skill].append((pawn.name, null_skill,))
     def formatted_pawn(pawn):
         name, skill_info = pawn
         if skill_info['passion'] == 'Major':
@@ -896,10 +918,19 @@ def top(soup, options):
         if skill_info['passion'] == 'Minor':
             return f"{name:>20} (\033[92m{skill_info['level']:>2}\033[00m)"
         return f"{name:>20} ({skill_info['level']:>2})"
+    useful_skills = {'Construction', 'Mining', 'Cooking', 'Plants', 'Crafting', 'Intellectual',}
     for skill in SKILLS:
-        pawns = sorted(top[skill], key=lambda x: int(x[1]['level']), reverse=True)
-        print(f"{skill:14} {''.join([formatted_pawn(pawn) for pawn in pawns[:4]])}")
-
+        pawns = sorted(top[skill], key=lambda x: int(x[1]['level']) + float(x[1]['pct']), reverse=True)
+        print(f"{skill:14} {''.join([formatted_pawn(pawn) for pawn in pawns[:4]])}\n")
+        if skill in useful_skills:
+            for idx, pawn in enumerate(pawns):
+                if idx < 4:
+                    useful[pawn[0]].append(skill)
+                elif int(pawn[1]['level']) > 6:
+                    half_useful[pawn[0]].append(skill)
+    print('\nProduction Utility')
+    for pawn in sorted(useful, key=lambda x: len(useful[x]) + len(half_useful[x])/2, reverse=True):
+        print(f"{pawn}: {', '.join(useful[pawn])}")
 def test(soup, option):
     """
     For ad hoc
