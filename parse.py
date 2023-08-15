@@ -146,19 +146,26 @@ def attribute(node, tags, default=''):
             return default
     return current_node and current_node.text or default
 
-def animals(soup):
+def all_animals(soup):
     """ Animals owned by colonists."""
-    animals = Counter()
+    owned_animals = []
     def add_animal(thing):
         if attribute(thing, 'def') != 'Human' and attribute(thing, 'faction') and attribute(thing,'mindstate'):
-            animals[attribute(thing, 'def')] += 1
+            owned_animals.append(attribute(thing, 'def'))
     for alivepawns in soup.find_all('pawnsalive'):
         for li in alivepawns.findChildren('li', recursive=False):
             add_animal(li)
     for thing in soup.find_all('thing'):
         add_animal(thing)
-    for animal in sorted(animals):
-        print("{},{}".format(animal, animals[animal]))
+    return owned_animals
+
+def animals(soup):
+    """ Animals owned by colonists."""
+    animal_ctr = Counter()
+    for animal in all_animals(soup):
+        animal_ctr[animal] += 1
+    for animal in sorted(animal_ctr):
+        print("{},{}".format(animal, animal_ctr[animal]))
 
 def wildlife(soup):
     """ Animals not owned by colonists."""
@@ -583,6 +590,13 @@ def ancient_danger_zone(soup):
 
 def things_in_inventory(soup):
     inventory = defaultdict(Counter)
+    inventory['Medicine']['Industrial'] = 0
+    inventory['Medicine']['Herbal'] = 0
+    inventory['Wool']['Cloth'] = 0
+    inventory['Ores']['Steel'] = 0
+    inventory['Misc']['WoodLog'] = 0
+    inventory['Raw Food']['Total'] = 0
+
     top, left, bottom, right = ancient_danger_zone(soup)
     things = []
     for thing in soup.find_all('thing'):
@@ -601,19 +615,22 @@ def things_in_inventory(soup):
     for obj in things:
         if not obj.biocoded:
             inventory[obj.category][obj.name] += obj.count
+        if obj.category == 'Raw Food':
+            inventory[obj.category]['Total'] += obj.count            
     return inventory
 
-class CounterIterator:
-    def __init__(self, ctr):
-        self.ctr = ctr
-
-    def nth(self, idx):
-        for index, item_name in enumerate(sorted(self.ctr)):
-            if index == idx:
-                return f" {item_name}: {self.ctr[item_name]}"
-        return ''
 
 def inventory_list(soup):
+    critical_levels = {
+        'WoodLog': (100, 50,),
+        'Steel': (100, 50,),
+        'Cloth': (90, 20,),
+    }
+    pawn_cnt = len(all_pawns(soup, {}))
+    critical_levels['Industrial'] = (2*pawn_cnt, 1.5*pawn_cnt,)
+    critical_levels['Total'] = (60*pawn_cnt, 30*pawn_cnt,)
+    animal_cnt = len(all_animals(soup))
+    critical_levels['Herbal'] = (1*animal_cnt, .5*animal_cnt,)
     inventory = things_in_inventory(soup)
     max_width = 0
     for c, k in inventory.items():
@@ -621,6 +638,17 @@ def inventory_list(soup):
         for item, count in k.items():
             max_width = max(max_width, len(f" {item}: {count}"))
     max_width += 4
+    def nth(ctr, idx):
+        for index, item_name in enumerate(sorted(ctr)):
+            if index == idx:
+                content = f"  {item_name}: {ctr[item_name]}"
+                if item_name in critical_levels and ctr[item_name] < critical_levels[item_name][1]:
+                    return f"\033[92;1m{content:{max_width}}\033[00m"
+                elif item_name in critical_levels and ctr[item_name] < critical_levels[item_name][0]:
+                    return f"\033[92m{content:{max_width}}\033[00m"
+                else:
+                    return f"{content:{max_width}}"
+        return ''
     try:
         num_columns = math.floor(os.get_terminal_size()[0]/(max_width))
 
@@ -628,10 +656,11 @@ def inventory_list(soup):
             fmt = f"{{:{max_width}}}"*len(category_chunk)
             print(fmt.format(*[category for category in category_chunk]))
             max_count = 0
+
             for category in category_chunk:
                 max_count = max(max_count, len(inventory[category].values()))
             for index in range(max_count):
-                print(fmt.format(*[CounterIterator(inventory[category]).nth(index) for category in category_chunk]))
+                print(fmt.format(*[nth(inventory[category], index) for category in category_chunk]))
             print()
     except OSError:
         for c in sorted(inventory):
