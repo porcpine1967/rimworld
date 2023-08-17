@@ -52,6 +52,7 @@ BODY_PARTS = {
     '11': 'Liver',
     '16': 'Left Eye',
     '17': 'Right Eye',
+    '20': 'Nose',
     '23': 'Left Shoulder',
     '24': 'Left Clavicle',
     '25': 'Left Arm',
@@ -59,12 +60,16 @@ BODY_PARTS = {
     '27': 'Left radius',
     '33': 'Left Thumb',
     '36': 'Right arm',
+    '44': 'Right Thumb',
     '46': 'Left Leg',
     '49': 'Right foot',
+    '50': 'Left toe',
+    '52': 'Left toe',
     '55': 'Right Leg',
     '57': 'Right tibia',
     '58': 'Right foot',
     '60': 'Right Toe',
+    '61': 'Right Toe',
 }
 
 APPAREL_LOCATION = (
@@ -243,8 +248,12 @@ class Pawn:
                 if issue_def in ('MissingBodyPart', 'Asthma',):
                     issue_name = issue_def == 'Asthma' and 'Asthma' or 'Missing'
                     part_number = attribute(issue, ('part', 'index',))
-                    part = part_number in BODY_PARTS and BODY_PARTS[part_number] or part_number
                     if not attribute(issue, 'lastinjury') == 'SurgicalCut':
+                        if part_number in BODY_PARTS:
+                            part = BODY_PARTS[part_number]
+                        else:
+                            self.missing_body_parts.add(part_number)
+                            part = part_number
                         self.permanent_injuries.append((f"{issue_name} {part}",
                                                         float(attribute(issue, 'severity', 0)),))
                     continue
@@ -256,18 +265,18 @@ class Pawn:
                    or issue_def.startswith('Bionic')\
                    or issue_def.endswith('Tolerance'):
                     continue
-                part_number = attribute(issue, ('part', 'index',))
-                if part_number in BODY_PARTS:
-                    part = BODY_PARTS[part_number]
-                else:
-                    self.missing_body_parts.add(part_number)
-                    part = part_number
-
                 if attribute(issue, 'ispermanent'):
+                    part_number = attribute(issue, ('part', 'index',))
+                    if part_number in BODY_PARTS:
+                        part = BODY_PARTS[part_number]
+                    else:
+                        self.missing_body_parts.add(part_number)
+                        part = part_number
+
                     self.permanent_injuries.append((f"Injured {part}",
                                                     float(attribute(issue, 'severity', 0)),))
                 else:
-                    self.temporary_injuries.append((f"Injured {part}",
+                    self.temporary_injuries.append((f"Injury",
                                                     float(attribute(issue, 'severity', 0)),))
 
     @property
@@ -616,9 +625,8 @@ def things_in_inventory(soup):
         if not obj.biocoded:
             inventory[obj.category][obj.name] += obj.count
         if obj.category == 'Raw Food':
-            inventory[obj.category]['Total'] += obj.count            
+            inventory[obj.category]['Total'] += obj.count
     return inventory
-
 
 def inventory_list(soup):
     critical_levels = {
