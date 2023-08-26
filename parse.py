@@ -261,7 +261,7 @@ class Pawn:
                     self.permanent_injuries.append((issue_def,
                                                    float(attribute(issue, 'severity', 0)),))
                     continue
-                if issue_def == ''\
+                if issue_def in ('', 'CochlearImplant',)\
                    or issue_def.startswith('Bionic')\
                    or issue_def.endswith('Tolerance'):
                     continue
@@ -380,7 +380,7 @@ class Pawn:
 def all_pawns(soup, options):
     pawns = []
     def add_pawn(thing):
-        if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') in COLONIST_FACTIONS:
+        if attribute(thing, 'kinddef') in ('Colonist', 'Tribesperson',) and attribute(thing, 'faction') in COLONIST_FACTIONS:
             pawn = Pawn(thing, options)
             pawns.append(pawn)
     for alivepawns in soup.find_all('pawnsalive'):
@@ -681,7 +681,7 @@ def equipment_list(soup, options):
     things_in_inventory(soup) # load Thing.maxes
     pawns = []
     def add_pawn(thing):
-        if attribute(thing, 'kinddef') == 'Colonist' and attribute(thing, 'faction') in COLONIST_FACTIONS:
+        if attribute(thing, 'kinddef') in ('Colonist', 'Tribesperson',) and attribute(thing, 'faction') in COLONIST_FACTIONS:
             pawns.append(Pawn(thing, options))
 
     for alivepawns in soup.find_all('pawnsalive'):
@@ -933,7 +933,7 @@ def queue(soup):
     if mine_ctr:
         print()
         print(f"{mine_ctr} mines")
-def top(soup, options):
+def top(soup, quantity, options):
     top = defaultdict(list)
     null_skill = {'level': 0, 'passion': None, 'pct': 0}
     pawn_objs = all_pawns(soup, options)
@@ -958,7 +958,7 @@ def top(soup, options):
     useful_skills = {'Construction', 'Mining', 'Cooking', 'Plants', 'Crafting', 'Intellectual',}
     for skill in SKILLS:
         pawns = sorted(top[skill], key=lambda x: int(x[1]['level']) + float(x[1]['pct']), reverse=True)
-        print(f"{skill:14} {''.join([formatted_pawn(pawn) for pawn in pawns[:4]])}\n")
+        print(f"{skill:14} {''.join([formatted_pawn(pawn) for pawn in pawns[:quantity or 4]])}\n")
         if skill in useful_skills:
             for idx, pawn in enumerate(pawns):
                 if idx < 4:
@@ -1002,12 +1002,13 @@ def run(args):
     elif args.action == 'queue':
         queue(soup)
     elif args.action == 'top':
-        top(soup, options)
+        top(soup, args.quantity, options)
     elif args.action == 'test':
         test(soup, options)
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
     parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests', 'queue', 'injury', 'top', 'test',], help="skills or inventory")
+    parser.add_argument("--quantity", help="How ever many of whatever, not for everything", type=int)
     args = parser.parse_args()
     run(args)
