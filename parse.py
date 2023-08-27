@@ -244,6 +244,7 @@ class Pawn:
     def load_injuries(self, thing):
         for tracker in thing.find_all('healthtracker'):
             for issue in tracker.find_all('li'):
+                issue_class = classname(issue)[0]
                 issue_def = attribute(issue, 'def')
                 if issue_def in ('MissingBodyPart', 'Asthma',):
                     issue_name = issue_def == 'Asthma' and 'Asthma' or 'Missing'
@@ -261,7 +262,8 @@ class Pawn:
                     self.permanent_injuries.append((issue_def,
                                                    float(attribute(issue, 'severity', 0)),))
                     continue
-                if issue_def in ('', 'CochlearImplant',)\
+                if issue_class == 'Hediff_AddedPart'\
+                   or not issue_class.startswith('Hediff')\
                    or issue_def.startswith('Bionic')\
                    or issue_def.endswith('Tolerance'):
                     continue
