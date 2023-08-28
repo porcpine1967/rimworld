@@ -244,7 +244,10 @@ class Pawn:
     def load_injuries(self, thing):
         for tracker in thing.find_all('healthtracker'):
             for issue in tracker.find_all('li'):
-                issue_class = classname(issue)[0]
+                try:
+                    issue_class = classname(issue)[0]
+                except IndexError:
+                    continue
                 issue_def = attribute(issue, 'def')
                 if issue_def in ('MissingBodyPart', 'Asthma',):
                     issue_name = issue_def == 'Asthma' and 'Asthma' or 'Missing'
