@@ -579,28 +579,52 @@ class Thing:
             n += ')'
         return n
 
-def ancient_danger_zone(soup):
-    """ Coordinates around all ancient cryptosleep caskets +/- 5"""
-    top = left = 250 # max position = 249
-    bottom = right = 0
-    for thing in soup.find_all('thing'):
-        try:
-            rimworld_category = classname(thing)[0]
-        except IndexError:
-            continue
-        if rimworld_category == 'Building_AncientCryptosleepCasket':
+class AncientDanger:
+    def __init__(self, soup):
+        self.zones = []
+        for thing in soup.find_all('thing'):
             try:
-                if not thing.innercontainer.innerlist.li:
-                    continue
-            except AttributeError:
+                rimworld_category = classname(thing)[0]
+            except IndexError:
                 continue
-            current_x, current_y = position(thing)
-            if position:
-                top = min(top, current_y)
-                bottom = max(bottom, current_y)
-                left = min(left, current_x)
-                right = max(right, current_x)
-    return top - 5, bottom + 5, left - 5, right + 5
+            if rimworld_category == 'Building_AncientCryptosleepCasket':
+                try:
+                    if not thing.innercontainer.innerlist.li:
+                        continue
+                except AttributeError:
+                    continue
+                current_x, current_y = position(thing)
+                for zone in self.zones:
+                    if zone.maybe_add_point(current_x, current_y):
+                        break
+                else:
+                    self.zones.append(AncientDangerZone(current_x, current_y))
+
+    def contains(self, x, y):
+        for zone in self.zones:
+            if zone.contains(x, y):
+                return True
+
+class AncientDangerZone:
+    def __init__(self, init_x, init_y):
+        self.left = self.right = init_x
+        self.top = self.bottom = init_y
+
+    def maybe_add_point(self, x, y):
+        """ If point in general area, add the point and return true"""
+        if  -15 < x - self.left < 15 \
+            and -15 < x - self.right < 15 \
+            and -15 < y - self.top < 15 \
+            and -15 < y - self.bottom < 15:
+            self.top = max(self.top, y)
+            self.bottom = min(self.bottom, y)
+            self.left = min(self.left, x)
+            self.right = max(self.right, x)
+            return True
+
+    def contains(self, x, y):
+        """Is the point plausibly in the zone"""
+        return self.top + 5 > y > self.bottom - 5 and self.left -5  < x < self.right + 5
 
 def things_in_inventory(soup):
     inventory = defaultdict(Counter)
@@ -611,18 +635,18 @@ def things_in_inventory(soup):
     inventory['Misc']['WoodLog'] = 0
     inventory['Raw Food']['Total'] = 0
 
-    top, left, bottom, right = ancient_danger_zone(soup)
+    ancient_danger = AncientDanger(soup)
     things = []
     for thing in soup.find_all('thing'):
         try:
             rimworld_category = classname(thing)[0]
         except IndexError:
             continue
+        skip = False
         if rimworld_category in ('ThingWithComps', 'Medicine', 'Apparel', 'UnfinishedThing'):
             obj = Thing(thing)
-            if top < obj.position[1] < bottom and left < obj.position[0] < right:
-                continue
-            things.append(obj)
+            if not ancient_danger.contains(*obj.position):
+                things.append(obj)
         if "MinifiedThing" in rimworld_category:
             obj = Thing(thing.innercontainer.innerlist.li)
             things.append(obj)
@@ -938,6 +962,7 @@ def queue(soup):
     if mine_ctr:
         print()
         print(f"{mine_ctr} mines")
+
 def top(soup, quantity, options):
     top = defaultdict(list)
     null_skill = {'level': 0, 'passion': None, 'pct': 0}
@@ -973,6 +998,26 @@ def top(soup, quantity, options):
     print('\nProduction Utility')
     for pawn in sorted(useful, key=lambda x: len(useful[x]) + len(half_useful[x])/2, reverse=True):
         print(f"{pawn}: {', '.join(useful[pawn])}")
+
+def where(soup):
+    ancient_danger = AncientDanger(soup)
+    things = []
+    for thing in soup.find_all('thing'):
+        try:
+            rimworld_category = classname(thing)[0]
+        except IndexError:
+            continue
+        skip = False
+        if rimworld_category in ('ThingWithComps', 'Medicine', 'Apparel', 'UnfinishedThing'):
+            obj = Thing(thing)
+            if not ancient_danger.contains(*obj.position):
+                things.append(obj)
+        if "MinifiedThing" in rimworld_category:
+            obj = Thing(thing.innercontainer.innerlist.li)
+            things.append(obj)
+    for thing in sorted(things, key=lambda x: x.name):
+        print(thing.base_name, thing.position)
+
 def test(soup, option):
     """
     For ad hoc
@@ -1008,12 +1053,14 @@ def run(args):
         queue(soup)
     elif args.action == 'top':
         top(soup, args.quantity, options)
+    elif args.action == 'where':
+        where(soup)
     elif args.action == 'test':
         test(soup, options)
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("faction", help="name of faction")
-    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests', 'queue', 'injury', 'top', 'test',], help="skills or inventory")
+    parser.add_argument("action", choices=['equipment', 'dead', 'skills', 'inventory', 'animals', 'harvest', 'wildlife', 'quests', 'queue', 'injury', 'top', 'where', 'test',], help="skills or inventory")
     parser.add_argument("--quantity", help="How ever many of whatever, not for everything", type=int)
     args = parser.parse_args()
     run(args)
