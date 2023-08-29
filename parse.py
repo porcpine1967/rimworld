@@ -42,35 +42,51 @@ SKILL_UPGRADE = {
     20: 32000,
 }
 
-BODY_PARTS = {
-    '0': 'Torso',
-    '1': 'Ribcage',
-    '2': 'Sternum',
-    '4': 'Spine',
-    '7': 'Left Lung',
-    '8': 'Right Lung',
-    '11': 'Liver',
-    '16': 'Left Eye',
-    '17': 'Right Eye',
-    '20': 'Nose',
-    '23': 'Left Shoulder',
-    '24': 'Left Clavicle',
-    '25': 'Left Arm',
-    '26': 'Left humerus',
-    '27': 'Left radius',
-    '33': 'Left Thumb',
-    '36': 'Right arm',
-    '44': 'Right Thumb',
-    '46': 'Left Leg',
-    '49': 'Right foot',
-    '50': 'Left toe',
-    '52': 'Left toe',
-    '55': 'Right Leg',
-    '57': 'Right tibia',
-    '58': 'Right foot',
-    '60': 'Right Toe',
-    '61': 'Right Toe',
-}
+def body_part(body_part_num):
+    if not body_part_num:
+        return 'General'
+    num = int(body_part_num)
+    if num in range(0, 3 + 1):
+        return 'Torso'
+    elif num  == 4:
+        return 'Spine'
+    elif num  == 5:
+        return 'Stomach'
+    elif num  == 6:
+        return 'Heart'
+    elif num == 7:
+        return 'Left Lung'
+    elif num == 8:
+        return 'Right Lung'
+    elif num == 11:
+        return 'Liver'
+    elif num == 15:
+        return 'Brain?'
+    elif num == 16:
+        return 'Left Eye'
+    elif num == 17:
+        return 'Right Eye'
+    elif num == 18:
+        return 'Left Ear'
+    elif num == 19:
+        return 'Right Ear'
+    elif num == 20:
+        return 'Nose'
+    elif num == 23:
+        return 'Left Arm'
+    elif num in range(24, 33 + 1):
+        return 'Left Arm Part'
+    elif num in range(34, 44 + 1):
+        return 'Right arm'
+    elif num == 46:
+        return 'Left Leg'
+    elif num in range(47, 52 + 1):
+        return 'Left Leg Part'
+    elif num == 55:
+        return 'Right Leg'
+    elif num in range(56, 63 + 1):
+        return 'Right Leg Part'
+    return body_part_num
 
 APPAREL_LOCATION = (
     ('Helmet', 'head',),
@@ -202,11 +218,11 @@ class Pawn:
         self.name = attribute(thing, ('name', 'nick',)) or attribute( thing, ('name', 'first'))
         self.changes = []
         self.thing = thing
-        self.permanent_injuries = []
+        self.injuries = []
         self.temporary_injuries = []
         self.items = defaultdict(MockThing)
         self.skills = defaultdict(dict)
-        self.missing_body_parts = set()
+        self.missing_body_part_nums = set()
 
         self.load_skills(thing, options)
         self.load_injuries(thing)
@@ -242,47 +258,63 @@ class Pawn:
         options[self.name] =  ','.join(self.skill_list[1:])
 
     def load_injuries(self, thing):
+        added_parts = {}
+        implants = defaultdict(list)
+        missing_parts = {}
+        injured_parts = defaultdict(list)
+        complications = defaultdict(list)
         for tracker in thing.find_all('healthtracker'):
             for issue in tracker.find_all('li'):
                 try:
-                    issue_class = classname(issue)[0]
+                    _class = classname(issue)[0]
+                    if _class == 'HediffWithComps':
+                        _class = 'Hediff_Complication'
+                    if not _class.startswith('Hediff_'):
+                        continue
+                    issue_class = _class[7:]
                 except IndexError:
                     continue
                 issue_def = attribute(issue, 'def')
-                if issue_def in ('MissingBodyPart', 'Asthma',):
-                    issue_name = issue_def == 'Asthma' and 'Asthma' or 'Missing'
-                    part_number = attribute(issue, ('part', 'index',))
-                    if not attribute(issue, 'lastinjury') == 'SurgicalCut':
-                        if part_number in BODY_PARTS:
-                            part = BODY_PARTS[part_number]
-                        else:
-                            self.missing_body_parts.add(part_number)
-                            part = part_number
-                        self.permanent_injuries.append((f"{issue_name} {part}",
-                                                        float(attribute(issue, 'severity', 0)),))
-                    continue
-                if issue_def.endswith('Addiction'):
-                    self.permanent_injuries.append((issue_def,
-                                                   float(attribute(issue, 'severity', 0)),))
-                    continue
-                if issue_class == 'Hediff_AddedPart'\
-                   or not issue_class.startswith('Hediff')\
-                   or issue_def.startswith('Bionic')\
-                   or issue_def.endswith('Tolerance'):
-                    continue
-                if attribute(issue, 'ispermanent'):
-                    part_number = attribute(issue, ('part', 'index',))
-                    if part_number in BODY_PARTS:
-                        part = BODY_PARTS[part_number]
+                perm = attribute(issue, 'ispermanent')
+                part_number = attribute(issue, ('part', 'index',))
+                part = body_part(part_number)
+                severity = float(attribute(issue, 'severity', 0))
+                if issue_class == 'AddedPart':
+                    added_parts[part] = issue_def
+                elif issue_class == 'Implant':
+                    implants[part].append(issue_def)
+                elif issue_class == 'MissingPart':
+                    if part.endswith('Part'):
+                        injured_parts[part[:-5]].append(severity)
                     else:
-                        self.missing_body_parts.add(part_number)
-                        part = part_number
+                        missing_parts[part] = issue_def
+                elif issue_class == 'Injury' and perm == 'True':
+                    injured_parts[part.replace(' Part', '')].append(severity)
+                elif issue_class == 'Injury':
+                    self.temporary_injuries.append((part, severity,))
+                elif issue_class in ('Addiction', 'Complication'):
+                    complications[part].append(issue_def)
 
-                    self.permanent_injuries.append((f"Injured {part}",
-                                                    float(attribute(issue, 'severity', 0)),))
+
+        for part, addition in added_parts.items():
+            # NOT CURRENTLY INTERESTED IN ENHANCEMENTS
+            if 'Bionic' not in addition and 'Archotech' not in addition:
+                self.injuries.append(f" {part} has {addition}")
+        # NOT CURRENTLY INTERESTED IN ENHANCEMENTS
+        # for part, addition in implants.items():
+        #     self.injuries.append(f" {part} has {addition}")
+        for part in missing_parts:
+            if not part in added_parts:
+                self.injuries.append(f" {part} missing")
+        for part, injuries in injured_parts.items():
+            if part not in added_parts and part not in missing_parts:
+                self.injuries.append(f" {part} permanently injured ({len(injuries):2} injuries, {max(injuries):.2} max)")
+        for part, complication_list in complications.items():
+            for complication in complication_list:
+                if part == 'General':
+                    self.injuries.append(f" {complication}")
                 else:
-                    self.temporary_injuries.append((f"Injury",
-                                                    float(attribute(issue, 'severity', 0)),))
+                    self.injuries.append(f" {complication} in {part}")
 
     @property
     def injury_count(self):
@@ -836,13 +868,12 @@ class Bill:
 def injuries(soup, options):
     missing = set()
     def print_injuries(pawn):
-        if pawn.permanent_injuries or pawn.temporary_injuries:
-            missing.update(pawn.missing_body_parts)
+        if pawn.injuries:
+            missing.update(pawn.missing_body_part_nums)
             print(pawn.name)
-            for name, severity in sorted(pawn.temporary_injuries, key=lambda x: x[1], reverse=True):
-                print(f"  {name:20} {severity: >5.2f}")
-            for name, severity in sorted(pawn.permanent_injuries, key=lambda x: x[0]):
-                print(f"\033[38:5:249m  {name:20} {severity: >5.2f}\033[0m")
+            for injury in pawn.injuries:
+                print(injury)
+
     for pawn in sorted(all_pawns(soup, options), key=lambda x: x.name):
         print_injuries(pawn)
 
@@ -1018,7 +1049,7 @@ def where(soup):
     for thing in sorted(things, key=lambda x: x.name):
         print(thing.base_name, thing.position)
 
-def test(soup, option):
+def test(soup, options):
     """
     For ad hoc
     """
